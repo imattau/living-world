@@ -4,6 +4,20 @@ const DEFAULT_SEED := 20_260_926
 const WORLD_MAP_VIEW_SCRIPT := preload("res://scripts/presentation/world_map_view.gd")
 const HISTORY_REPLAY_SCRIPT := preload("res://scripts/simulation/history_replay.gd")
 const WORLD_SAVE_STORE_SCRIPT := preload("res://scripts/simulation/world_save_store.gd")
+const TREND_GRAPH_VIEW_SCRIPT := preload("res://scripts/presentation/trend_graph_view.gd")
+
+const CHRONICLE_MAX_VISIBLE_EVENTS := 300
+const CHRONICLE_FILTER_ALL := 0
+const CHRONICLE_FILTER_WAR := 1
+const CHRONICLE_FILTER_FOOD := 2
+const CHRONICLE_FILTER_POLITICS := 3
+const CHRONICLE_FILTER_TYPES := {
+	CHRONICLE_FILTER_WAR: ["war_declared", "battle_resolved", "peace_agreed", "territory_annexed"],
+	CHRONICLE_FILTER_FOOD: ["famine_began", "harvest_failure", "harvest_recovery", "population_migrated", "food_traded"],
+	CHRONICLE_FILTER_POLITICS: [
+		"ruler_died", "ruler_succeeded", "succession_crisis", "state_fragmented", "state_founded", "culture_split",
+	],
+}
 
 var _seed_input: SpinBox
 var _map_view: WorldMapView
@@ -15,7 +29,10 @@ var _summary_label: Label
 var _selection_label: Label
 var _food_aid_button: Button
 var _chronicle_list: ItemList
+var _chronicle_filter: OptionButton
 var _event_detail_label: Label
+var _trend_graph: TrendGraphView
+var _state_legend: HBoxContainer
 var _world: WorldState
 var _display_world: WorldState
 var _simulation_engine := SimulationEngine.new()
@@ -126,12 +143,27 @@ func _build_interface() -> void:
 	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	column.add_child(content)
 
+	var map_column := VBoxContainer.new()
+	map_column.add_theme_constant_override("separation", 6)
+	map_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	map_column.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	content.add_child(map_column)
+
 	_map_view = WORLD_MAP_VIEW_SCRIPT.new() as WorldMapView
 	_map_view.custom_minimum_size = Vector2(560, 560)
 	_map_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_map_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_map_view.settlement_selected.connect(_on_settlement_selected)
-	content.add_child(_map_view)
+	map_column.add_child(_map_view)
+
+	var legend_scroll := ScrollContainer.new()
+	legend_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	legend_scroll.custom_minimum_size.y = 26
+	map_column.add_child(legend_scroll)
+
+	_state_legend = HBoxContainer.new()
+	_state_legend.add_theme_constant_override("separation", 14)
+	legend_scroll.add_child(_state_legend)
 
 	var sidebar := VBoxContainer.new()
 	sidebar.custom_minimum_size.x = 290
@@ -148,6 +180,16 @@ func _build_interface() -> void:
 	_summary_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sidebar.add_child(_summary_label)
 
+	var trend_title := Label.new()
+	trend_title.text = "Population · wars (red) · famine (amber)"
+	trend_title.add_theme_font_size_override("font_size", 13)
+	sidebar.add_child(trend_title)
+
+	_trend_graph = TREND_GRAPH_VIEW_SCRIPT.new() as TrendGraphView
+	_trend_graph.custom_minimum_size = Vector2(0, 70)
+	_trend_graph.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sidebar.add_child(_trend_graph)
+
 	var selection_title := Label.new()
 	selection_title.text = "Selected settlement"
 	selection_title.add_theme_font_size_override("font_size", 18)
@@ -163,10 +205,23 @@ func _build_interface() -> void:
 	_food_aid_button.pressed.connect(_on_send_food_aid_pressed)
 	sidebar.add_child(_food_aid_button)
 
+	var chronicle_header := HBoxContainer.new()
+	chronicle_header.add_theme_constant_override("separation", 10)
+	sidebar.add_child(chronicle_header)
+
 	var chronicle_title := Label.new()
-	chronicle_title.text = "Recent history"
+	chronicle_title.text = "Recorded history"
 	chronicle_title.add_theme_font_size_override("font_size", 18)
-	sidebar.add_child(chronicle_title)
+	chronicle_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	chronicle_header.add_child(chronicle_title)
+
+	_chronicle_filter = OptionButton.new()
+	_chronicle_filter.add_item("All events", CHRONICLE_FILTER_ALL)
+	_chronicle_filter.add_item("War & conflict", CHRONICLE_FILTER_WAR)
+	_chronicle_filter.add_item("Food & population", CHRONICLE_FILTER_FOOD)
+	_chronicle_filter.add_item("Politics & culture", CHRONICLE_FILTER_POLITICS)
+	_chronicle_filter.item_selected.connect(_on_chronicle_filter_changed)
+	chronicle_header.add_child(_chronicle_filter)
 
 	var chronicle_scroll := ScrollContainer.new()
 	chronicle_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -272,6 +327,8 @@ func _refresh_world_view() -> void:
 		+ influence_summary + "\n"
 		+ "Recorded events: %d" % viewed.events.size()
 	)
+	_refresh_state_legend(viewed)
+	_refresh_trend_graph(viewed)
 	_update_food_aid_button()
 	_refresh_chronicle()
 	if _selected_settlement_id >= 0 and viewed.settlements.has(_selected_settlement_id):
@@ -279,16 +336,90 @@ func _refresh_world_view() -> void:
 	else:
 		_selection_label.text = "Click a settlement marker to inspect it."
 
+func _refresh_state_legend(viewed: WorldState) -> void:
+	for child in _state_legend.get_children():
+		child.queue_free()
+	var state_ids := viewed.states.keys()
+	state_ids.sort()
+	for state_id in state_ids:
+		var state: StateData = viewed.states[state_id]
+		if state.settlement_ids.is_empty():
+			continue
+		var chip := HBoxContainer.new()
+		chip.add_theme_constant_override("separation", 4)
+		var swatch := ColorRect.new()
+		swatch.color = WorldMapView.state_color(int(state_id))
+		swatch.custom_minimum_size = Vector2(12, 12)
+		chip.add_child(swatch)
+		var name_label := Label.new()
+		name_label.text = state.name
+		name_label.add_theme_font_size_override("font_size", 12)
+		chip.add_child(name_label)
+		_state_legend.add_child(chip)
+
+func _refresh_trend_graph(viewed: WorldState) -> void:
+	var point_years := PackedInt32Array()
+	var points := PackedFloat32Array()
+	for checkpoint in viewed.snapshots:
+		var checkpoint_year := int(checkpoint.get("year", 0))
+		if checkpoint_year > viewed.year:
+			continue
+		var state_dict: Dictionary = checkpoint.get("state", {})
+		var settlements_data: Array = state_dict.get("settlements", [])
+		var population := 0
+		for settlement_data in settlements_data:
+			population += int(settlement_data.get("population", 0))
+		point_years.append(checkpoint_year)
+		points.append(float(population))
+	var current_population := 0
+	for settlement_value in viewed.settlements.values():
+		var settlement: SettlementData = settlement_value
+		current_population += settlement.population
+	if point_years.is_empty() or point_years[-1] != viewed.year:
+		point_years.append(viewed.year)
+		points.append(float(current_population))
+
+	var war_years := {}
+	var famine_years := {}
+	for event in viewed.events:
+		if event.year > viewed.year:
+			continue
+		if event.type == "battle_resolved" or event.type == "war_declared":
+			war_years[event.year] = true
+		elif event.type == "famine_began":
+			famine_years[event.year] = true
+	var war_years_array := PackedInt32Array()
+	for year in war_years.keys():
+		war_years_array.append(int(year))
+	war_years_array.sort()
+	var famine_years_array := PackedInt32Array()
+	for year in famine_years.keys():
+		famine_years_array.append(int(year))
+	famine_years_array.sort()
+
+	_trend_graph.set_data(point_years, points, war_years_array, famine_years_array, maxi(1, viewed.year))
+
+func _on_chronicle_filter_changed(_index: int) -> void:
+	_refresh_chronicle()
+
 func _refresh_chronicle() -> void:
 	_chronicle_list.clear()
 	_visible_events.clear()
 	var viewed := _display_world
-	var start_index := maxi(0, viewed.events.size() - 12)
-	for event_index in range(viewed.events.size() - 1, start_index - 1, -1):
+	var filter_id := CHRONICLE_FILTER_ALL
+	if _chronicle_filter.selected >= 0:
+		filter_id = _chronicle_filter.get_item_id(_chronicle_filter.selected)
+	var allowed_types: Array = CHRONICLE_FILTER_TYPES.get(filter_id, [])
+	var shown := 0
+	for event_index in range(viewed.events.size() - 1, -1, -1):
+		if shown >= CHRONICLE_MAX_VISIBLE_EVENTS:
+			break
 		var event: HistoryEvent = viewed.events[event_index]
+		if filter_id != CHRONICLE_FILTER_ALL and not allowed_types.has(event.type):
+			continue
 		var title := event.type.replace("_", " ").capitalize()
 		var line := "Year %d · %s" % [event.year, title]
-		if event.type in ["war_declared", "battle_resolved", "peace_agreed"]:
+		if event.type in ["war_declared", "battle_resolved", "peace_agreed", "territory_annexed"]:
 			var state_names: Array[String] = []
 			for state_id in event.participant_ids:
 				if viewed.states.has(state_id):
@@ -318,6 +449,7 @@ func _refresh_chronicle() -> void:
 			line += " (peace)"
 		_visible_events.append(event)
 		_chronicle_list.add_item(line)
+		shown += 1
 	if _visible_events.is_empty():
 		_chronicle_list.add_item("No events yet.")
 		_chronicle_list.set_item_disabled(0, true)
@@ -396,9 +528,11 @@ func _on_settlement_selected(settlement_id: int) -> void:
 	var region: RegionData = viewed.regions[settlement.region_id]
 	var culture: CultureData = viewed.cultures[settlement.culture_id]
 	var state_name := "Independent"
+	var leader_line := ""
 	if settlement.state_id >= 0 and viewed.states.has(settlement.state_id):
 		var state: StateData = viewed.states[settlement.state_id]
 		state_name = state.name
+		leader_line = "Ruled by: %s (since year %d)\n" % [state.leader_label, state.leader_since_year]
 	var position := viewed.map.get_cell_position(settlement.site_cell_index)
 	_selection_label.text = (
 		"%s\n" % settlement.name
@@ -407,6 +541,7 @@ func _on_settlement_selected(settlement_id: int) -> void:
 		+ "Region: %s\n" % region.name
 		+ "Culture: %s\n" % culture.name
 		+ "Political state: %s\n" % state_name
+		+ leader_line
 		+ "Fertility: %.2f\n" % settlement.fertility
 		+ "Freshwater: %s\n" % ("yes" if settlement.freshwater_adjacent else "no")
 		+ "Cell: %d, %d" % [position.x, position.y]

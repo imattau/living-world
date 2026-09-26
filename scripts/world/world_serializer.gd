@@ -70,6 +70,7 @@ static func to_state_dictionary(world: WorldState) -> Dictionary:
 			"language_label": culture.language_label,
 			"religion_label": culture.religion_label,
 			"values": culture.values,
+			"years_states_diverged": culture.years_states_diverged,
 		})
 	var states: Array[Dictionary] = []
 	for entity_id in _sorted_integer_keys(world.states):
@@ -87,6 +88,13 @@ static func to_state_dictionary(world: WorldState) -> Dictionary:
 			"settlement_ids": state.settlement_ids.duplicate(),
 			"region_ids": state.region_ids.duplicate(),
 			"leader_label": state.leader_label,
+			"leader_id": state.leader_id,
+			"leader_since_year": state.leader_since_year,
+			"leader_age": state.leader_age,
+			"leader_ordinal": state.leader_ordinal,
+			"succession_rule": state.succession_rule,
+			"years_below_fragmentation_threshold": state.years_below_fragmentation_threshold,
+			"dissolved_year": state.dissolved_year,
 			"treasury": state.treasury,
 			"stability": state.stability,
 			"relationships": relationship_records,
@@ -102,6 +110,7 @@ static func to_state_dictionary(world: WorldState) -> Dictionary:
 		"command_cursor": world.command_cursor,
 		"next_command_sequence": world.next_command_sequence,
 		"influence": world.influence,
+		"max_states": world.max_states,
 		"map": _map_to_dictionary(world.map),
 		"regions": regions,
 		"settlements": settlements,
@@ -166,6 +175,7 @@ static func from_state_dictionary(data: Dictionary) -> Dictionary:
 	world.command_cursor = int(data.get("command_cursor", 0))
 	world.next_command_sequence = int(data.get("next_command_sequence", 1))
 	world.influence = float(data.get("influence", 3.0))
+	world.max_states = int(data.get("max_states", 999_999))
 	world.map = _map_from_dictionary(data["map"])
 	if world.map == null:
 		return {"error": "World checkpoint map data is incomplete."}
@@ -211,6 +221,7 @@ static func from_state_dictionary(data: Dictionary) -> Dictionary:
 		culture.language_label = str(culture_data["language_label"])
 		culture.religion_label = str(culture_data["religion_label"])
 		culture.values = PackedFloat32Array(culture_data["values"])
+		culture.years_states_diverged = int(culture_data.get("years_states_diverged", 0))
 		world.cultures[culture.id] = culture
 	for state_data in data["states"]:
 		var state := StateData.new()
@@ -220,6 +231,13 @@ static func from_state_dictionary(data: Dictionary) -> Dictionary:
 		state.settlement_ids = _int_array(state_data["settlement_ids"])
 		state.region_ids = _int_array(state_data["region_ids"])
 		state.leader_label = str(state_data["leader_label"])
+		state.leader_id = int(state_data.get("leader_id", -1))
+		state.leader_since_year = int(state_data.get("leader_since_year", 0))
+		state.leader_age = int(state_data.get("leader_age", 30))
+		state.leader_ordinal = int(state_data.get("leader_ordinal", 1))
+		state.years_below_fragmentation_threshold = int(state_data.get("years_below_fragmentation_threshold", 0))
+		state.dissolved_year = int(state_data.get("dissolved_year", -1))
+		state.succession_rule = str(state_data.get("succession_rule", "hereditary"))
 		state.treasury = float(state_data["treasury"])
 		state.stability = float(state_data["stability"])
 		for relationship in state_data.get("relationships", []):

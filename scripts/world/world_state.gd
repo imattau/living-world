@@ -3,13 +3,14 @@ extends RefCounted
 
 var seed: int
 var generator_version: int = 1
-var simulation_version: int = 4
+var simulation_version: int = 6
 var year: int = 0
 var map: WorldMap
 var regions: Dictionary = {}
 var settlements: Dictionary = {}
 var cultures: Dictionary = {}
 var states: Dictionary = {}
+var max_states: int = 999_999
 var events: Array[HistoryEvent] = []
 var snapshots: Array[Dictionary] = []
 var command_log: Array[Dictionary] = []

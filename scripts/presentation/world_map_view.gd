@@ -33,9 +33,19 @@ func _draw() -> void:
 				color = Color("416f8b")
 			elif map.is_river[index] == 1:
 				color = Color("568bac")
+			if map.is_land[index] == 1:
+				var controlling_state_id := _controlling_state_at(map, x, y)
+				if controlling_state_id >= 0:
+					color = color.lerp(state_color(controlling_state_id), 0.32)
 			draw_rect(rect, color)
 			if map.is_land[index] == 1 and _has_region_edge(map, x, y):
 				draw_rect(rect, Color(0.055, 0.07, 0.08, 0.26), false, 1.0)
+
+	for y in map.height:
+		for x in map.width:
+			if map.is_land[map.get_index(x, y)] == 0:
+				continue
+			_draw_state_border_if_needed(map, x, y)
 
 	for settlement_value in world.settlements.values():
 		var settlement: SettlementData = settlement_value
@@ -65,6 +75,40 @@ func _gui_input(event: InputEvent) -> void:
 			settlement_selected.emit(settlement.id)
 			accept_event()
 			return
+
+func _controlling_state_at(map: WorldMap, x: int, y: int) -> int:
+	var region_id := map.region_id[map.get_index(x, y)]
+	if region_id < 0 or world == null or not world.regions.has(region_id):
+		return -1
+	var region: RegionData = world.regions[region_id]
+	return region.controlling_state_id
+
+static func state_color(state_id: int) -> Color:
+	var hue := fposmod(float(state_id) * 0.6180339887, 1.0)
+	return Color.from_hsv(hue, 0.55, 0.85)
+
+func _draw_state_border_if_needed(map: WorldMap, x: int, y: int) -> void:
+	var this_state := _controlling_state_at(map, x, y)
+	var top_left := _map_origin + Vector2(x, y) * _cell_size
+	for offset: Vector2i in [Vector2i(1, 0), Vector2i(0, 1)]:
+		var nx := x + offset.x
+		var ny := y + offset.y
+		if nx >= map.width or ny >= map.height:
+			continue
+		if map.is_land[map.get_index(nx, ny)] == 0:
+			continue
+		var neighbor_state := _controlling_state_at(map, nx, ny)
+		if neighbor_state == this_state:
+			continue
+		var edge_start := top_left
+		var edge_end := top_left
+		if offset.x == 1:
+			edge_start += Vector2(_cell_size, 0.0)
+			edge_end += Vector2(_cell_size, _cell_size)
+		else:
+			edge_start += Vector2(0.0, _cell_size)
+			edge_end += Vector2(_cell_size, _cell_size)
+		draw_line(edge_start, edge_end, Color(0.05, 0.05, 0.06, 0.85), 2.0)
 
 func _has_region_edge(map: WorldMap, x: int, y: int) -> bool:
 	var index := map.get_index(x, y)

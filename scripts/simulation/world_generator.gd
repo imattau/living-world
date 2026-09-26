@@ -44,6 +44,7 @@ func generate(world_seed: int) -> WorldState:
 	_create_settlements(world, components)
 	_assign_cultures_by_origin(world, components)
 	_create_initial_states(world, components)
+	world.max_states = maxi(2, world.states.size() * 2)
 	_recalculate_region_summaries(world)
 	world.snapshots.append(WorldSerializer.make_checkpoint(world))
 	return world
@@ -509,6 +510,9 @@ func _create_initial_states(world: WorldState, _components: Dictionary) -> void:
 		state.id = world.allocate_entity_id()
 		state.name = "State %02d" % (anchor_index + 1)
 		state.government_type = "chiefdom"
+		state.leader_id = world.allocate_entity_id()
+		state.leader_since_year = 0
+		state.leader_age = _society_rng.range_int(25, 45)
 		world.states[state.id] = state
 		states_by_anchor[anchor_index] = state
 
