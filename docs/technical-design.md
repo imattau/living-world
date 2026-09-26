@@ -1,4 +1,6 @@
-# Technical Design — Initial Direction
+# Technical Design — Overview
+
+This page summarizes the initial architecture and prototype scope. For implementation details, see the [Technical Design Brief](technical-design-brief.md).
 
 ## Product target
 

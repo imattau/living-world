@@ -8,7 +8,7 @@ Generate a seeded world, simulate 200–250 years, and make its history interest
 
 ## Project status
 
-Initial project scaffold. See [the design brief](docs/design-brief.md) and [technical design](docs/technical-design.md).
+Initial project scaffold. See [the design brief](docs/design-brief.md), [technical design overview](docs/technical-design.md), and [implementation-ready technical design brief](docs/technical-design-brief.md).
 
 ## Getting started
 
