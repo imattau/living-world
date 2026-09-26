@@ -1,5 +1,6 @@
 ; Living World — Godot project configuration
 config_version=5
+config/features=PackedStringArray("4.7", "GL Compatibility")
 
 [application]
 config/name="Living World"

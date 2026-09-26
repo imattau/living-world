@@ -2,7 +2,7 @@
 
 **Status:** Initial implementation brief  
 **Audience:** Engineering and design  
-**Engine:** Godot 4.x / GDScript  
+**Engine:** Godot 4.7.x stable / GDScript
 **Target:** Desktop prototype; single player; offline simulation
 
 ## 1. Purpose
@@ -69,7 +69,7 @@ Renders read-only world data and sends explicit commands such as `advance_years(
 
 Use typed GDScript classes in `scripts/world/` for model records and `RefCounted` services in `scripts/simulation/`. Use `Node` only for application lifecycle and presentation. Avoid using `.tscn` resources as the authoritative storage for generated world entities.
 
-## 5. Proposed model
+## 5. Data model
 
 All entities use stable integer IDs scoped to one world. IDs are assigned by deterministic generation order. Save files store IDs rather than object references; runtime indexes resolve IDs to records.
 
@@ -80,14 +80,14 @@ All entities use stable integer IDs scoped to one world. IDs are assigned by det
 - `simulation_version: int`
 - `year: int`
 - `map_width`, `map_height: int`
-- `cells: Array[CellData]`
+- `map: MapData`
 - dictionaries keyed by ID: `regions`, `settlements`, `cultures`, `states`
 - `events: Array[HistoryEvent]`
 - `next_entity_id`, `next_event_id: int`
 
-### `CellData`
+### `MapData`
 
-Static or slowly changing map attributes: elevation, temperature band, rainfall, biome ID, river flag, fertility, resource potential, and region ID. Store cells in row-major order (`y * width + x`). Political ownership is resolved through the region/state data rather than duplicated on every tile unless rendering profiling later justifies a cached array.
+Store dense map fields as parallel packed arrays in row-major order (`index = y * width + x`): `PackedFloat32Array` for elevation, temperature, rainfall, fertility, and four resource potentials; `PackedInt32Array` for biome and region ID; `PackedByteArray` for land and river flags. This keeps generation and rendering contiguous and avoids thousands of small objects. Put accessors and index conversion in `MapData`; callers should not calculate offsets independently. Political ownership is resolved through regions/states rather than duplicated on every cell.
 
 ### `RegionData`
 
@@ -128,13 +128,13 @@ Initial government types: tribe, chiefdom, city-state, kingdom, and republic. Bo
 
 ### Population representation
 
-Most people exist only in aggregate. Track total population per settlement and a small set of occupational shares or counts sufficient for food production, administration, and defense. Do not model a record per inhabitant. Use bounded growth and explicit capacity/food-pressure rules to prevent runaway population.
+Most people exist only in aggregate. Track total population per settlement and a small set of occupational shares or counts sufficient for food production, administration, and defense. Do not model a record per inhabitant. Use bounded growth and explicit capacity/food-pressure rules to prevent runaway population. Per-settlement initial carrying capacity is `500 + 1,500 × site_fertility + 300` for a freshwater-adjacent site (otherwise no freshwater bonus).
 
 ## 6. Deterministic simulation
 
 ### Randomness
 
-Use an explicit seed and Godot's seeded RNG facilities. Separate streams by subsystem (generation, weather, migration, politics, conflict) so adding a random draw in one subsystem does not silently change unrelated outcomes. Derive stream seeds from the world seed, subsystem key, and simulation version using a documented stable integer-mixing function. Never seed from wall-clock time in reproducible runs.
+Use a project-owned Park–Miller PRNG (modulus 2,147,483,647; multiplier 48,271) rather than engine RNG, so replay does not depend on Godot RNG implementation changes. World seeds are integers in `[1, 2,147,483,646]`. Derive a nonzero stream seed as `1 + ((world_seed + subsystem_id × 104729 + version × 13007) mod 2,147,483,646)`, with fixed subsystem IDs documented in code. Maintain independent streams for generation, weather, migration, politics, and conflict. Document this algorithm in code and treat a change as a version change. Never seed from wall-clock time in reproducible runs.
 
 Rules should process entities in sorted stable-ID order. Do not rely on dictionary iteration order. For each phase, collect proposed changes before applying them where one entity's iteration position could otherwise confer an advantage.
 
@@ -201,23 +201,23 @@ Event queries should support year range, region, entity participation, event typ
 Generation is a deterministic pipeline:
 
 1. Initialize named RNG streams from the world seed.
-2. Generate a 48×48 elevation field and classify land/water.
-3. Derive temperature and rainfall from latitude/elevation plus seeded variation.
-4. Trace rivers from high elevation toward low elevation and mark navigable/river-adjacent cells for settlement scoring.
-5. Derive biome, fertility, and resource potential.
-6. Cluster habitable cells into approximately 20 contiguous regions; retain neighbor adjacency.
-7. Score candidate settlement locations using water access, fertility, resources, transport, and defensibility.
-8. Place 8–20 initial settlements with minimum spacing and assign populations.
-9. Create initial cultures and optional small states based on region and settlement layout.
-10. Validate map connectivity, IDs, ownership references, and that generated settlements occupy habitable cells.
+2. Generate elevation with three octaves of project-owned smooth value noise on a 48×48 grid. Use fixed lattice sizes 6, 12, and 24, weights 0.55, 0.30, and 0.15, plus a mild latitude term. Interpolate with smoothstep; normalize the result to 0–1. Cells below the 0.38 elevation threshold are sea. If land is disconnected into multiple components, retain all components but only seed settlements on components with at least 8% of total habitable area.
+3. Derive temperature from latitude and elevation: normalized temperature = clamp(1 − 0.85 × absolute latitude − 0.35 × elevation, 0, 1). Generate rainfall from two-octave smooth value noise (weights 0.7/0.3) plus a broad wetness band; clamp to 0–1.
+4. Route each land cell to its steepest lower D8 neighbor; break equal-height ties by lowest cell index. Cells with no lower neighbor are local basins and are marked as lakes. Accumulate upstream land-cell counts in descending elevation order. Mark rivers where accumulation reaches 12 cells; river cells and their immediate land neighbors get freshwater access.
+5. Derive biome from temperature and rainfall bands. Fertility = clamp(0.55 × rainfall + 0.30 × soil potential + 0.15 × river access, 0, 1), where soil potential is a third seeded smooth-noise field. Four resource potentials come from separate deterministic noise fields modulated by biome suitability.
+6. Select 20 region seeds by farthest-point sampling over habitable cells, first seed chosen from the highest-fertility valid cell and subsequent seeds maximizing minimum Manhattan distance. Assign each land cell to the nearest seed by multi-source breadth-first expansion across D8 land neighbors; ties go to the lower region ID. Preserve region adjacency. If fewer than 20 valid seeds exist, use the available count.
+7. Score settlement candidates: `3 × fertility + 2 × freshwater + resource_potential + 0.5 × coast_access − 2 × local_slope`, all normalized 0–1 except the final score. Greedily pick 12 sites, requiring a Manhattan distance of at least 4 between sites; relax to 2 if fewer than 8 sites can be placed.
+8. Assign starting populations using a seeded integer range of 300–1,200 and assign each settlement to the nearest of three culture origins.
+9. Create three cultures. Seed three proto-states by clustering settlements around three seeded anchor sites; assign remaining settlements to the nearest anchor if land-connected, leaving remote settlements independent. States are limited to five; later state formation/splitting follows political rules.
+10. Validate IDs, references, nonempty regions, land connectivity within each region, and that settlements occupy habitable cells.
 
 Generation algorithms should favor explainable inputs over artistic perfection. Keep map generation functions independent so each stage can be replaced without changing simulation entity interfaces.
 
 ## 9. Historical browsing and persistence
 
-Current world state alone cannot provide rewind. Use periodic serialized checkpoints plus deterministic event/state deltas between them. For the first prototype, checkpoint every 25 years and at year 0; historical browsing loads the nearest prior checkpoint and replays the same versioned simulation to the requested year. Keep a separate view-state object so scrubbing does not mutate the live head state. If replay cost proves excessive, shorten checkpoint intervals.
+Current world state alone cannot provide rewind. Store a full serialized state snapshot at year 0 and every 25 years. Each snapshot includes all mutable entity/map values plus the event-log cursor and command-log cursor. For an inspected year, load the nearest earlier snapshot into a separate world instance and replay at most 24 annual ticks. The live simulation head is never mutated by timeline scrubbing. Once interventions exist, store commands ordered by `(year, sequence_number)` and replay them at the start of their recorded year.
 
-Save format should be versioned JSON or Godot's supported variant serialization for the first pass. Store the seed, world/simulation versions, current year, entity state, events, and checkpoint metadata. Validate IDs and references on load, and provide a clear error for unsupported versions. Do not adopt SQLite until save size or event-query performance demonstrates a need.
+Use a single versioned JSON save at `user://saves/<world-id>.json` for the prototype. Store the current state, append-only event log, snapshots, seed, versions, and command log. Entity tables are arrays sorted by ID; map fields use JSON arrays. This favors inspectability over compactness at 48×48 scale. Do not adopt SQLite until measured save size or event query latency requires it. Reject unsupported save versions with a clear message; do not silently migrate or drop data.
 
 ## 10. Presentation and user flow
 
@@ -264,13 +264,25 @@ These are acceptance scenarios for implementation; they do not prescribe a testi
 
 Only after the prototype produces histories worth inspecting should intervention, story detection, richer notable people, or optional narrative generation enter scope.
 
-## 15. Open decisions
+## 15. Settled prototype defaults
 
-Resolve these during implementation, record the choice, and increment the appropriate version if it changes generated outcomes:
+These choices are fixed for the first implementation. Tune numerical balance after observing generated histories, but preserve the formulas and bump `simulation_version` whenever a change alters outcomes.
 
-- Exact Godot minor version and any target export platforms.
-- Whether map cells use typed arrays or `CellData` records after initial profiling.
-- Exact region clustering and river-routing algorithms.
-- Population capacity and food-consumption tuning.
-- Whether historical checkpoints store full snapshots or compressed serialized variants.
-- Final migration and conflict equations after observing early generated worlds.
+- **Engine/platform:** Godot 4.7.x stable (current maintenance release at the time of this brief); GDScript; desktop Linux first. No plugins or external runtime dependencies. No Godot executable is installed in the current workspace, so editor/runtime validation begins after one is available.
+- **Map storage:** parallel packed arrays in `MapData`, row-major indexing.
+- **Height/climate:** custom smooth value noise on fixed lattice scales, not engine noise classes. Sea threshold 0.38; three elevation octaves; two rainfall octaves.
+- **Rivers:** steepest-lower-neighbor D8 routing with deterministic tie-break; flow accumulation threshold 12. Closed basins are lakes.
+- **Regions:** 20 farthest-sampled seeds and multi-source D8 breadth-first expansion on land. Actual count can be lower if valid land area is insufficient.
+- **Settlements:** 12 seeded starting sites, minimum Manhattan spacing 4, relax to 2 to place at least 8. Starting population 300–1,200.
+- **Starting society:** exactly three cultures and three proto-state anchors when at least three sites exist; remote sites may remain independent. Cap at five concurrent states until later tuning.
+- **Randomness:** project-owned Park–Miller PRNG with independent subsystem streams and stable sorted entity iteration.
+- **Population model:** persons as integer totals. Use the settlement capacity formula above for each settlement; a region's effective capacity is the sum of capacities of its active settlements. Annual natural growth starts at 1% when food coverage is at least 1.0 and decreases linearly to 0% at 0.5 coverage. Below 0.5 coverage, add mortality linearly up to 3% at zero coverage. Multiply natural growth by `max(0, 1 − population / carrying_capacity)` and cap net natural growth at 1.5% per year. Food coverage is food available before consumption divided by annual need; annual need is 1 food unit per person.
+- **Food production:** annual base yield is `population × fertility × 1.2`; add a deterministic rainfall/weather factor in `[0.75, 1.25]`. Stores cap at two years of current need. This makes 1.0-fertility settlements near self-sufficiency before trade and gives poor harvests visible consequences.
+- **Migration:** only settlements below 0.6 food coverage propose migration. Move up to 5% of population per year to an adjacent-region destination if its projected food coverage exceeds the origin by at least 0.25 and it has capacity. Split among eligible destinations by score; apply moves simultaneously.
+- **Trade:** adjacent controlled settlements may transfer surplus food above one year of reserve to a neighbor below 0.75 coverage, up to 10% of surplus per year. No money or market-clearing model in this milestone.
+- **Conflict:** dispute score starts from border adjacency (0.25), a contested-region claim (0.35), and resource pressure (up to 0.40). War can be declared at score ≥0.70 when both states have stability ≥0.25. Resolve one coarse engagement per neighboring pair per year from normalized population/food strength plus seeded variance of ±15%; record inputs and outcome as event facts.
+- **Historical state:** full JSON snapshot at year 0 and every 25 years; separate inspect-state replay, at most 24 ticks from checkpoint.
+- **Save format:** one versioned JSON file under `user://saves/`, sorted entity arrays, map arrays, event history, snapshots, and future command log. No SQLite for the prototype.
+- **Presentation target:** desktop at 1280×720, mouse and keyboard; renderer stays on the current compatibility setting until visuals require another choice.
+
+Values above are starting balance parameters, not claims of realism. The first evaluation pass should generate 20 seeds and inspect year-250 population ranges, settlement survival, state count, famine frequency, and causal legibility. Change values based on these observations and increment the simulation version when outputs change. Godot 4.7.2 is the current stable maintenance release in the official release archive; track the latest stable 4.7 patch while avoiding development builds. [Godot release archive](https://godotengine.org/download/archive/).
