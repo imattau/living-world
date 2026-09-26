@@ -12,7 +12,7 @@ static func append_settlement_founded_events(world: WorldState) -> void:
 		event.year = 0
 		event.type = "settlement_founded"
 		event.location_region_id = settlement.region_id
-		event.subject_ids = [settlement.id]
+		event.subject_ids.append(settlement.id)
 		var status_name := "hamlet" if settlement.status == SettlementData.STATUS_HAMLET else "village"
 		event.facts = {"population": settlement.population, "status": status_name}
 		world.events.append(event)

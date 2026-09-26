@@ -187,6 +187,10 @@ func _refresh_chronicle() -> void:
 			line += " — " + settlement.name
 		if event.facts.has("food_coverage"):
 			line += " (food %.0f%%)" % (float(event.facts["food_coverage"]) * 100.0)
+		if event.facts.has("population_moved"):
+			line += " (%s people)" % _format_number(int(event.facts["population_moved"]))
+		if event.facts.has("food_amount"):
+			line += " (%.0f food)" % float(event.facts["food_amount"])
 		lines.append(line)
 	_chronicle_label.text = "No events yet." if lines.is_empty() else "\n".join(lines)
 
