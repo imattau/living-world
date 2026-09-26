@@ -149,9 +149,11 @@ static func from_save_dictionary(data: Dictionary) -> Dictionary:
 			return {"error": "Save event log contains an invalid entry."}
 		if typeof(event_data.get("facts", {})) != TYPE_DICTIONARY or typeof(event_data.get("cause_links", [])) != TYPE_ARRAY:
 			return {"error": "Save event data is malformed."}
+		if typeof(event_data["id"]) not in [TYPE_INT, TYPE_FLOAT] or typeof(event_data["year"]) not in [TYPE_INT, TYPE_FLOAT]:
+			return {"error": "Save event IDs or years are invalid."}
 		var event_id := int(event_data["id"])
 		var event_year := int(event_data["year"])
-		if typeof(event_data["id"]) != TYPE_INT or typeof(event_data["year"]) != TYPE_INT or event_id <= previous_event_id or event_year < 0:
+		if event_id <= previous_event_id or event_year < 0:
 			return {"error": "Save event IDs or years are invalid."}
 		for cause_value in event_data.get("cause_links", []):
 			if typeof(cause_value) != TYPE_DICTIONARY:
@@ -163,7 +165,7 @@ static func from_save_dictionary(data: Dictionary) -> Dictionary:
 			if strength < 0.0 or strength > 1.0:
 				return {"error": "Save event cause strength must be between 0 and 1."}
 			if cause.has("event_id"):
-				if typeof(cause["event_id"]) != TYPE_INT:
+				if typeof(cause["event_id"]) not in [TYPE_INT, TYPE_FLOAT]:
 					return {"error": "Save event cause reference is invalid."}
 				var source_id := int(cause["event_id"])
 				if not seen_event_years.has(source_id) or int(seen_event_years[source_id]) > event_year:
@@ -180,7 +182,7 @@ static func from_save_dictionary(data: Dictionary) -> Dictionary:
 		for checkpoint in data["snapshots"]:
 			if typeof(checkpoint) != TYPE_DICTIONARY or not checkpoint.has("year") or not checkpoint.has("event_cursor") or typeof(checkpoint.get("state", {})) != TYPE_DICTIONARY:
 				return {"error": "Save checkpoint data is malformed."}
-		world.snapshots = data["snapshots"].duplicate(true)
+		world.snapshots.assign(data["snapshots"].duplicate(true))
 	if not world.events.is_empty() and int(world.events[-1].id) >= world.next_event_id:
 		return {"error": "Save event counter does not follow its event log."}
 	return {"world": world}
@@ -288,10 +290,10 @@ static func _map_to_dictionary(map: WorldMap) -> Dictionary:
 		"soil_potential": map.soil_potential,
 		"biome": map.biome,
 		"region_id": map.region_id,
-		"is_land": map.is_land,
-		"is_river": map.is_river,
-		"is_lake": map.is_lake,
-		"has_freshwater": map.has_freshwater,
+		"is_land": Array(map.is_land),
+		"is_river": Array(map.is_river),
+		"is_lake": Array(map.is_lake),
+		"has_freshwater": Array(map.has_freshwater),
 		"resource_potential": resources,
 	}
 
@@ -351,7 +353,7 @@ static func _event_from_dictionary(data: Dictionary) -> HistoryEvent:
 	event.subject_ids = _int_array(data.get("subject_ids", []))
 	event.participant_ids = _int_array(data.get("participant_ids", []))
 	event.facts = data.get("facts", {}).duplicate(true)
-	event.cause_links = data.get("cause_links", []).duplicate(true)
+	event.cause_links.assign(data.get("cause_links", []).duplicate(true))
 	return event
 
 static func _int_array(values: Array) -> Array[int]:
