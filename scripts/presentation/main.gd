@@ -3,12 +3,14 @@ extends Control
 const DEFAULT_SEED := 20_260_926
 const WORLD_MAP_VIEW_SCRIPT := preload("res://scripts/presentation/world_map_view.gd")
 const HISTORY_REPLAY_SCRIPT := preload("res://scripts/simulation/history_replay.gd")
+const WORLD_SAVE_STORE_SCRIPT := preload("res://scripts/simulation/world_save_store.gd")
 
 var _seed_input: SpinBox
 var _map_view: WorldMapView
 var _year_label: Label
 var _history_slider: HSlider
 var _history_timer: Timer
+var _storage_status_label: Label
 var _summary_label: Label
 var _selection_label: Label
 var _chronicle_list: ItemList
@@ -17,6 +19,7 @@ var _world: WorldState
 var _display_world: WorldState
 var _simulation_engine := SimulationEngine.new()
 var _history_replay: HistoryReplay
+var _save_store: WorldSaveStore
 var _selected_settlement_id: int = -1
 var _visible_events: Array[HistoryEvent] = []
 var _updating_timeline := false
@@ -24,6 +27,7 @@ var _updating_timeline := false
 func _ready() -> void:
 	_build_interface()
 	_history_replay = HISTORY_REPLAY_SCRIPT.new() as HistoryReplay
+	_save_store = WORLD_SAVE_STORE_SCRIPT.new() as WorldSaveStore
 	_generate_world(DEFAULT_SEED)
 
 func _build_interface() -> void:
@@ -80,6 +84,16 @@ func _build_interface() -> void:
 	generate_button.pressed.connect(_on_generate_pressed)
 	header.add_child(generate_button)
 
+	var save_button := Button.new()
+	save_button.text = "Save"
+	save_button.pressed.connect(_on_save_pressed)
+	header.add_child(save_button)
+
+	var load_button := Button.new()
+	load_button.text = "Load"
+	load_button.pressed.connect(_on_load_pressed)
+	header.add_child(load_button)
+
 	var timeline_row := HBoxContainer.new()
 	timeline_row.add_theme_constant_override("separation", 10)
 	column.add_child(timeline_row)
@@ -95,6 +109,10 @@ func _build_interface() -> void:
 	_history_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_history_slider.value_changed.connect(_on_history_year_changed)
 	timeline_row.add_child(_history_slider)
+
+	_storage_status_label = Label.new()
+	_storage_status_label.custom_minimum_size.x = 180
+	timeline_row.add_child(_storage_status_label)
 
 	_history_timer = Timer.new()
 	_history_timer.one_shot = true
@@ -163,6 +181,25 @@ func _build_interface() -> void:
 
 func _on_generate_pressed() -> void:
 	_generate_world(int(_seed_input.value))
+	_storage_status_label.text = "New world generated."
+
+func _on_save_pressed() -> void:
+	var result: Dictionary = _save_store.save_world(_world)
+	_storage_status_label.text = str(result.get("message", "Save failed."))
+
+func _on_load_pressed() -> void:
+	var result: Dictionary = _save_store.load_world()
+	_storage_status_label.text = str(result.get("message", "Load failed."))
+	if not bool(result.get("ok", false)):
+		return
+	_history_timer.stop()
+	_world = result["world"]
+	_display_world = _world
+	_simulation_engine = SimulationEngine.new()
+	_history_replay.clear()
+	_selected_settlement_id = -1
+	_seed_input.value = _world.seed
+	_refresh_world_view()
 
 func _on_advance_one_year_pressed() -> void:
 	_advance_years(1)
@@ -174,6 +211,7 @@ func _generate_world(seed_value: int) -> void:
 	_history_timer.stop()
 	_simulation_engine = SimulationEngine.new()
 	_world = WorldGenerator.new().generate(seed_value)
+	_display_world = _world
 	_history_replay.clear()
 	_selected_settlement_id = -1
 	_refresh_world_view()

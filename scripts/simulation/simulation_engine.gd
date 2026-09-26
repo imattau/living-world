@@ -31,6 +31,8 @@ func advance_year(world: WorldState) -> Array[HistoryEvent]:
 	for event in _pending_events:
 		world.events.append(event)
 		last_year_events.append(event)
+	if world.year > 0 and world.year % 25 == 0:
+		world.snapshots.append(WorldSerializer.make_checkpoint(world))
 	return last_year_events.duplicate()
 
 func advance_years(world: WorldState, count: int) -> Array[HistoryEvent]:

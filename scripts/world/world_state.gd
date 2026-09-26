@@ -11,6 +11,7 @@ var settlements: Dictionary = {}
 var cultures: Dictionary = {}
 var states: Dictionary = {}
 var events: Array[HistoryEvent] = []
+var snapshots: Array[Dictionary] = []
 var next_entity_id: int = 1
 var next_event_id: int = 1
 

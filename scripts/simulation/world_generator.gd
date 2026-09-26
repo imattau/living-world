@@ -45,6 +45,7 @@ func generate(world_seed: int) -> WorldState:
 	_assign_cultures_by_origin(world, components)
 	_create_initial_states(world, components)
 	_recalculate_region_summaries(world)
+	world.snapshots.append(WorldSerializer.make_checkpoint(world))
 	return world
 
 func _generate_elevation(map: WorldMap) -> void:
