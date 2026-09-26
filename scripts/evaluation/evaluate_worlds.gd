@@ -38,6 +38,7 @@ func _summarize_world(world: WorldState, starting_population: int) -> Dictionary
 	var territories_annexed := 0
 	var states_fragmented := 0
 	var states_founded := 0
+	var culture_splits := 0
 	var events_with_facts := 0
 	var events_with_cause_links := 0
 	var maximum_dispute_score := 0.0
@@ -89,6 +90,8 @@ func _summarize_world(world: WorldState, starting_population: int) -> Dictionary
 				states_fragmented += 1
 			"state_founded":
 				states_founded += 1
+			"culture_split":
+				culture_splits += 1
 	var active_state_ids := {}
 	for settlement_value in world.settlements.values():
 		var settlement: SettlementData = settlement_value
@@ -113,6 +116,8 @@ func _summarize_world(world: WorldState, starting_population: int) -> Dictionary
 		"territories_annexed": territories_annexed,
 		"states_fragmented": states_fragmented,
 		"states_founded": states_founded,
+		"culture_splits": culture_splits,
+		"cultures_final": world.cultures.size(),
 		"events_total": world.events.size(),
 		"events_with_facts_percent": 100.0 * float(events_with_facts) / maxf(1.0, float(world.events.size())),
 		"events_with_cause_links": events_with_cause_links,
@@ -150,6 +155,7 @@ func _summarize_collection(rows: Array[Dictionary]) -> Dictionary:
 	var total_territories_annexed := 0
 	var total_states_fragmented := 0
 	var total_states_founded := 0
+	var total_culture_splits := 0
 	for row in rows:
 		population_values.append(int(row["population_at_year_250"]))
 		initial_population_values.append(int(row["population_at_year_0"]))
@@ -178,6 +184,7 @@ func _summarize_collection(rows: Array[Dictionary]) -> Dictionary:
 		total_territories_annexed += int(row["territories_annexed"])
 		total_states_fragmented += int(row["states_fragmented"])
 		total_states_founded += int(row["states_founded"])
+		total_culture_splits += int(row["culture_splits"])
 	population_values.sort()
 	initial_population_values.sort()
 	surviving_values.sort()
@@ -221,4 +228,5 @@ func _summarize_collection(rows: Array[Dictionary]) -> Dictionary:
 		"territories_annexed_total": total_territories_annexed,
 		"states_fragmented_total": total_states_fragmented,
 		"states_founded_total": total_states_founded,
+		"culture_splits_total": total_culture_splits,
 	}

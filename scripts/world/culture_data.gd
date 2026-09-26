@@ -8,3 +8,4 @@ var parent_ids: Array[int] = []
 var language_label: String
 var religion_label: String
 var values := PackedFloat32Array()
+var years_states_diverged: int = 0

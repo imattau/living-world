@@ -70,6 +70,7 @@ static func to_state_dictionary(world: WorldState) -> Dictionary:
 			"language_label": culture.language_label,
 			"religion_label": culture.religion_label,
 			"values": culture.values,
+			"years_states_diverged": culture.years_states_diverged,
 		})
 	var states: Array[Dictionary] = []
 	for entity_id in _sorted_integer_keys(world.states):
@@ -220,6 +221,7 @@ static func from_state_dictionary(data: Dictionary) -> Dictionary:
 		culture.language_label = str(culture_data["language_label"])
 		culture.religion_label = str(culture_data["religion_label"])
 		culture.values = PackedFloat32Array(culture_data["values"])
+		culture.years_states_diverged = int(culture_data.get("years_states_diverged", 0))
 		world.cultures[culture.id] = culture
 	for state_data in data["states"]:
 		var state := StateData.new()

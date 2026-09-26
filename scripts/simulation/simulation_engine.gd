@@ -33,6 +33,9 @@ const NEW_STATE_LEADER_AGE := 30
 const NEW_STATE_STABILITY_FRAGMENT := 0.5
 const FORMATION_STATE_STABILITY := 0.6
 const FORMATION_POPULATION_THRESHOLD := 400
+const CULTURE_DRIFT_MAX_PULL_WEIGHT := 0.15
+const CULTURE_DRIFT_MAX_YEARLY_SHIFT_PER_DIMENSION := 0.05
+const CULTURE_SPLIT_YEARS_THRESHOLD := 10
 
 var last_year_events: Array[HistoryEvent] = []
 var _pending_events: Array[HistoryEvent] = []
@@ -56,6 +59,7 @@ func advance_year(world: WorldState) -> Array[HistoryEvent]:
 	_update_leadership(world, target_year)
 	_update_state_cohesion(world, target_year)
 	_update_territorial_growth(world, target_year)
+	_update_culture_divergence(world, target_year)
 	world.influence = minf(INFLUENCE_CAP, world.influence + INFLUENCE_REGEN_PER_YEAR)
 	world.year = target_year
 	for event in _pending_events:
@@ -333,6 +337,7 @@ func _apply_migration(
 		settlement.population = maxi(0, settlement.population + int(population_delta[settlement_id]))
 		var available_food: float = reports[settlement_id]["available_food"]
 		settlement.food_coverage = available_food / maxf(1.0, float(settlement.population))
+	_apply_migration_culture_drift(world, proposals)
 	for origin_id in _sorted_integer_keys(moved_by_origin):
 		var origin: SettlementData = world.settlements[origin_id]
 		var destination_ids: Array = destinations_by_origin[origin_id]
@@ -365,6 +370,51 @@ func _apply_migration(
 			participants,
 			cause_links
 		)
+
+func _apply_migration_culture_drift(world: WorldState, proposals: Array[Dictionary]) -> void:
+	var cumulative_shift := {}
+	for proposal in proposals:
+		var amount: int = proposal["amount"]
+		if amount <= 0:
+			continue
+		var origin_id: int = proposal["origin"]
+		var destination_id: int = proposal["destination"]
+		if not world.settlements.has(origin_id) or not world.settlements.has(destination_id):
+			continue
+		var origin_settlement: SettlementData = world.settlements[origin_id]
+		var destination_settlement: SettlementData = world.settlements[destination_id]
+		var origin_culture_id := origin_settlement.culture_id
+		var destination_culture_id := destination_settlement.culture_id
+		if origin_culture_id < 0 or destination_culture_id < 0 or origin_culture_id == destination_culture_id:
+			continue
+		if not world.cultures.has(origin_culture_id) or not world.cultures.has(destination_culture_id):
+			continue
+		var origin_culture: CultureData = world.cultures[origin_culture_id]
+		var destination_culture: CultureData = world.cultures[destination_culture_id]
+		var dimensions := mini(origin_culture.values.size(), destination_culture.values.size())
+		if dimensions <= 0:
+			continue
+		var weight := clampf(
+			float(amount) / float(maxi(1, destination_settlement.population)), 0.0, CULTURE_DRIFT_MAX_PULL_WEIGHT
+		)
+		if weight <= 0.0:
+			continue
+		if not cumulative_shift.has(destination_culture_id):
+			var zeros: Array[float] = []
+			zeros.resize(dimensions)
+			zeros.fill(0.0)
+			cumulative_shift[destination_culture_id] = zeros
+		var shift_used: Array[float] = cumulative_shift[destination_culture_id]
+		for index in dimensions:
+			var used: float = shift_used[index]
+			if used >= CULTURE_DRIFT_MAX_YEARLY_SHIFT_PER_DIMENSION:
+				continue
+			var remaining := CULTURE_DRIFT_MAX_YEARLY_SHIFT_PER_DIMENSION - used
+			var delta := clampf(
+				(origin_culture.values[index] - destination_culture.values[index]) * weight, -remaining, remaining
+			)
+			destination_culture.values[index] = clampf(destination_culture.values[index] + delta, 0.0, 1.0)
+			shift_used[index] = used + absf(delta)
 
 func _apply_food_trade(world: WorldState, entity_ids: Array[int], year: int) -> void:
 	var proposals: Array[Dictionary] = []
@@ -499,12 +549,21 @@ func _update_politics_and_conflict(world: WorldState, year: int) -> void:
 				float(food_pressure_by_state[first_id]),
 				float(food_pressure_by_state[second_id])
 			), 0.0, 1.0)
-			var dispute_score := 0.25 + (0.35 if contested else 0.0) + 0.40 * resource_pressure
+			var cultural_distance := _cultural_distance(
+				world, _state_dominant_culture(world, first_id), _state_dominant_culture(world, second_id)
+			)
+			var dispute_score := (
+				0.20
+				+ (0.30 if contested else 0.0)
+				+ 0.30 * resource_pressure
+				+ 0.20 * cultural_distance
+			)
 			var is_at_war := first.at_war_with.has(second_id) or second.at_war_with.has(first_id)
 			var relation := {
 				"dispute_score": dispute_score,
 				"contested_claim": contested,
 				"resource_pressure": resource_pressure,
+				"cultural_distance": cultural_distance,
 				"last_updated_year": year,
 			}
 			first.relationships[second_id] = relation.duplicate(true)
@@ -537,6 +596,7 @@ func _update_politics_and_conflict(world: WorldState, year: int) -> void:
 						"dispute_score": dispute_score,
 						"contested_claim": contested,
 						"resource_pressure": resource_pressure,
+						"cultural_distance": cultural_distance,
 						"stability": [first.stability, second.stability],
 					},
 					[first_id, second_id],
@@ -1012,6 +1072,81 @@ func _update_territorial_growth(world: WorldState, year: int) -> void:
 			}
 		)
 
+func _update_culture_divergence(world: WorldState, year: int) -> void:
+	for culture_id in _sorted_integer_keys(world.cultures):
+		var culture: CultureData = world.cultures[culture_id]
+		var settlements_by_state := {}
+		for settlement_id in _sorted_settlement_ids(world):
+			var settlement: SettlementData = world.settlements[settlement_id]
+			if settlement.culture_id != culture_id or settlement.status == SettlementData.STATUS_ABANDONED:
+				continue
+			var state_key: int = settlement.state_id
+			if not settlements_by_state.has(state_key):
+				settlements_by_state[state_key] = []
+			settlements_by_state[state_key].append(settlement_id)
+		if settlements_by_state.size() < 2:
+			culture.years_states_diverged = 0
+			continue
+		culture.years_states_diverged += 1
+		if culture.years_states_diverged < CULTURE_SPLIT_YEARS_THRESHOLD:
+			continue
+		_split_culture(world, year, culture_id, settlements_by_state)
+
+func _split_culture(world: WorldState, year: int, culture_id: int, settlements_by_state: Dictionary) -> void:
+	var culture: CultureData = world.cultures[culture_id]
+	var group_state_ids := _sorted_integer_keys(settlements_by_state)
+	var largest_state_id := group_state_ids[0]
+	var largest_size := -1
+	for state_key in group_state_ids:
+		var group: Array = settlements_by_state[state_key]
+		if group.size() > largest_size:
+			largest_size = group.size()
+			largest_state_id = state_key
+
+	var existing_children := 0
+	for other_culture_id in world.cultures.keys():
+		var other: CultureData = world.cultures[other_culture_id]
+		if other.parent_ids.has(culture_id):
+			existing_children += 1
+
+	var child_culture_ids: Array[int] = []
+	for state_key in group_state_ids:
+		if state_key == largest_state_id:
+			continue
+		var group: Array = settlements_by_state[state_key]
+		existing_children += 1
+		var child := CultureData.new()
+		child.id = world.allocate_entity_id()
+		child.name = "%s %s" % [culture.name, _roman_numeral(existing_children + 1)]
+		child.origin_region_id = culture.origin_region_id
+		child.parent_ids.append(culture_id)
+		child.language_label = culture.language_label
+		child.religion_label = culture.religion_label
+		child.values = culture.values.duplicate()
+		world.cultures[child.id] = child
+		for settlement_id in group:
+			var settlement: SettlementData = world.settlements[settlement_id]
+			settlement.culture_id = child.id
+		child_culture_ids.append(child.id)
+
+	culture.years_states_diverged = 0
+	var home_region_id := -1
+	if largest_state_id >= 0 and world.states.has(largest_state_id):
+		home_region_id = _state_home_region(world, largest_state_id)
+	_record_event(
+		world,
+		"culture_split",
+		year,
+		home_region_id,
+		[culture_id],
+		{
+			"parent_culture_id": culture_id,
+			"child_culture_ids": child_culture_ids.duplicate(),
+			"state_ids_involved": group_state_ids.duplicate(),
+		},
+		child_culture_ids
+	)
+
 func _state_food_pressure(world: WorldState, state_id: int) -> float:
 	var weighted_pressure := 0.0
 	var population_total := 0.0
@@ -1043,6 +1178,39 @@ func _worst_food_settlement(world: WorldState, state_id: int) -> int:
 			worst_coverage = settlement.food_coverage
 			worst_id = settlement_id
 	return worst_id
+
+func _state_dominant_culture(world: WorldState, state_id: int) -> int:
+	var population_by_culture := {}
+	for settlement_id in _sorted_settlement_ids(world):
+		var settlement: SettlementData = world.settlements[settlement_id]
+		if settlement.state_id != state_id or settlement.status == SettlementData.STATUS_ABANDONED:
+			continue
+		population_by_culture[settlement.culture_id] = (
+			int(population_by_culture.get(settlement.culture_id, 0)) + settlement.population
+		)
+	var dominant_id := -1
+	var largest_population := -1
+	for culture_id in _sorted_integer_keys(population_by_culture):
+		var population: int = population_by_culture[culture_id]
+		if population > largest_population:
+			largest_population = population
+			dominant_id = culture_id
+	return dominant_id
+
+func _cultural_distance(world: WorldState, first_culture_id: int, second_culture_id: int) -> float:
+	if first_culture_id < 0 or second_culture_id < 0 or first_culture_id == second_culture_id:
+		return 0.0
+	if not world.cultures.has(first_culture_id) or not world.cultures.has(second_culture_id):
+		return 0.0
+	var first: CultureData = world.cultures[first_culture_id]
+	var second: CultureData = world.cultures[second_culture_id]
+	var dimensions := mini(first.values.size(), second.values.size())
+	if dimensions <= 0:
+		return 0.0
+	var total := 0.0
+	for index in dimensions:
+		total += absf(first.values[index] - second.values[index])
+	return clampf(total / float(dimensions), 0.0, 1.0)
 
 func _state_military_strength(world: WorldState, state_id: int) -> float:
 	var strength := 0.0
