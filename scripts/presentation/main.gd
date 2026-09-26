@@ -396,9 +396,11 @@ func _on_settlement_selected(settlement_id: int) -> void:
 	var region: RegionData = viewed.regions[settlement.region_id]
 	var culture: CultureData = viewed.cultures[settlement.culture_id]
 	var state_name := "Independent"
+	var leader_line := ""
 	if settlement.state_id >= 0 and viewed.states.has(settlement.state_id):
 		var state: StateData = viewed.states[settlement.state_id]
 		state_name = state.name
+		leader_line = "Ruled by: %s (since year %d)\n" % [state.leader_label, state.leader_since_year]
 	var position := viewed.map.get_cell_position(settlement.site_cell_index)
 	_selection_label.text = (
 		"%s\n" % settlement.name
@@ -407,6 +409,7 @@ func _on_settlement_selected(settlement_id: int) -> void:
 		+ "Region: %s\n" % region.name
 		+ "Culture: %s\n" % culture.name
 		+ "Political state: %s\n" % state_name
+		+ leader_line
 		+ "Fertility: %.2f\n" % settlement.fertility
 		+ "Freshwater: %s\n" % ("yes" if settlement.freshwater_adjacent else "no")
 		+ "Cell: %d, %d" % [position.x, position.y]

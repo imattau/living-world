@@ -87,6 +87,11 @@ static func to_state_dictionary(world: WorldState) -> Dictionary:
 			"settlement_ids": state.settlement_ids.duplicate(),
 			"region_ids": state.region_ids.duplicate(),
 			"leader_label": state.leader_label,
+			"leader_id": state.leader_id,
+			"leader_since_year": state.leader_since_year,
+			"leader_age": state.leader_age,
+			"leader_ordinal": state.leader_ordinal,
+			"succession_rule": state.succession_rule,
 			"treasury": state.treasury,
 			"stability": state.stability,
 			"relationships": relationship_records,
@@ -220,6 +225,11 @@ static func from_state_dictionary(data: Dictionary) -> Dictionary:
 		state.settlement_ids = _int_array(state_data["settlement_ids"])
 		state.region_ids = _int_array(state_data["region_ids"])
 		state.leader_label = str(state_data["leader_label"])
+		state.leader_id = int(state_data.get("leader_id", -1))
+		state.leader_since_year = int(state_data.get("leader_since_year", 0))
+		state.leader_age = int(state_data.get("leader_age", 30))
+		state.leader_ordinal = int(state_data.get("leader_ordinal", 1))
+		state.succession_rule = str(state_data.get("succession_rule", "hereditary"))
 		state.treasury = float(state_data["treasury"])
 		state.stability = float(state_data["stability"])
 		for relationship in state_data.get("relationships", []):

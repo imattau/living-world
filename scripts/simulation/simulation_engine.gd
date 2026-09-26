@@ -3,6 +3,7 @@ extends RefCounted
 
 const ENVIRONMENT_STREAM_ID := 5
 const CONFLICT_STREAM_ID := 7
+const LEADERSHIP_STREAM_ID := 9
 const FOOD_YIELD_PER_PERSON := 1.2
 const FOOD_NEED_PER_PERSON := 1.0
 const FOOD_STORE_CAP_YEARS := 2.0
@@ -12,6 +13,16 @@ const FOOD_RELIEF_INFLUENCE_COST := 1.0
 const FOOD_RELIEF_NEED_FRACTION := 0.5
 const ABANDONMENT_POPULATION := 25
 const YEARS_BELOW_ABANDONMENT_THRESHOLD := 5
+const LEADER_MIN_DEATH_AGE := 60
+const LEADER_DEATH_CHANCE_PER_YEAR_OVER_MIN := 0.02
+const LEADER_MAX_DEATH_CHANCE := 0.35
+const LOW_STABILITY_COUP_THRESHOLD := 0.15
+const COUP_CHANCE_PER_YEAR := 0.15
+const CONTESTED_STABILITY_CEILING := 0.35
+const CRISIS_STABILITY_PENALTY := 0.12
+const PEACEFUL_SUCCESSION_STABILITY_BONUS := 0.02
+const HEIR_MIN_AGE := 20
+const HEIR_MAX_AGE := 35
 
 var last_year_events: Array[HistoryEvent] = []
 var _pending_events: Array[HistoryEvent] = []
@@ -32,6 +43,7 @@ func advance_year(world: WorldState) -> Array[HistoryEvent]:
 	_update_settlement_status(world, entity_ids, target_year)
 	_apply_food_trade(world, entity_ids, target_year)
 	_update_politics_and_conflict(world, target_year)
+	_update_leadership(world, target_year)
 	world.influence = minf(INFLUENCE_CAP, world.influence + INFLUENCE_REGEN_PER_YEAR)
 	world.year = target_year
 	for event in _pending_events:
@@ -583,6 +595,97 @@ func _update_politics_and_conflict(world: WorldState, year: int) -> void:
 				[winner_id, loser_id]
 			)
 
+func _update_leadership(world: WorldState, year: int) -> void:
+	var state_ids := _sorted_integer_keys(world.states)
+	if state_ids.is_empty():
+		return
+	var rng := SeededRandom.new(
+		SeededRandom.derive_seed(world.seed, LEADERSHIP_STREAM_ID, world.simulation_version * 65_537 + year)
+	)
+	for state_id in state_ids:
+		var state: StateData = world.states[state_id]
+		state.leader_age += 1
+		var death_chance := clampf(
+			float(state.leader_age - LEADER_MIN_DEATH_AGE) * LEADER_DEATH_CHANCE_PER_YEAR_OVER_MIN,
+			0.0,
+			LEADER_MAX_DEATH_CHANCE
+		)
+		var died := death_chance > 0.0 and rng.next_float() < death_chance
+		var coup := (
+			not died
+			and state.stability < LOW_STABILITY_COUP_THRESHOLD
+			and rng.next_float() < COUP_CHANCE_PER_YEAR
+		)
+		if not died and not coup:
+			continue
+
+		var previous_leader_id := state.leader_id
+		var stability_before := state.stability
+		var home_region_id := _state_home_region(world, state_id)
+		if died:
+			_record_event(
+				world,
+				"ruler_died",
+				year,
+				home_region_id,
+				[state_id],
+				{"previous_leader_id": previous_leader_id, "age": state.leader_age, "cause": "old_age"}
+			)
+
+		var contested := coup or stability_before < CONTESTED_STABILITY_CEILING
+		var crisis := contested and rng.next_float() < 0.5
+		state.leader_id = world.allocate_entity_id()
+		state.leader_since_year = year
+		state.leader_age = rng.range_int(HEIR_MIN_AGE, HEIR_MAX_AGE)
+		state.leader_ordinal += 1
+		state.leader_label = "%s %s" % [state.name, _roman_numeral(state.leader_ordinal)]
+		if crisis:
+			state.stability = clampf(state.stability - CRISIS_STABILITY_PENALTY, 0.0, 1.0)
+		elif not contested:
+			state.stability = clampf(state.stability + PEACEFUL_SUCCESSION_STABILITY_BONUS, 0.0, 1.0)
+
+		var cause_links: Array[Dictionary] = []
+		var battle_cause := _find_causal_event(world, ["battle_resolved"], state_id)
+		if battle_cause != null and int(battle_cause.facts.get("loser_state_id", -1)) == state_id:
+			cause_links.append({
+				"category": "military_defeat",
+				"event_id": battle_cause.id,
+				"strength": stability_before,
+			})
+		var food_pressure := _state_food_pressure(world, state_id)
+		if food_pressure > 0.4:
+			var worst_settlement_id := _worst_food_settlement(world, state_id)
+			if worst_settlement_id >= 0:
+				var food_cause := _find_active_food_cause(world, worst_settlement_id)
+				if food_cause != null:
+					cause_links.append({
+						"category": "food_pressure",
+						"event_id": food_cause.id,
+						"strength": food_pressure,
+					})
+		_record_event(
+			world,
+			"succession_crisis" if crisis else "ruler_succeeded",
+			year,
+			home_region_id,
+			[state_id],
+			{
+				"previous_leader_id": previous_leader_id,
+				"new_leader_id": state.leader_id,
+				"method": "coup" if coup else "hereditary",
+				"stability_before": stability_before,
+				"stability_after": state.stability,
+			},
+			[state_id],
+			cause_links
+		)
+
+func _state_home_region(world: WorldState, state_id: int) -> int:
+	var state: StateData = world.states[state_id]
+	if not state.region_ids.is_empty():
+		return state.region_ids[0]
+	return -1
+
 func _state_food_pressure(world: WorldState, state_id: int) -> float:
 	var weighted_pressure := 0.0
 	var population_total := 0.0
@@ -872,6 +975,18 @@ func _status_for_population(population: int) -> int:
 	if population < 8_000:
 		return SettlementData.STATUS_TOWN
 	return SettlementData.STATUS_CITY
+
+const ROMAN_NUMERAL_VALUES := [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]
+const ROMAN_NUMERAL_SYMBOLS := ["M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I"]
+
+func _roman_numeral(value: int) -> String:
+	var remaining := value
+	var result := ""
+	for index in ROMAN_NUMERAL_VALUES.size():
+		while remaining >= ROMAN_NUMERAL_VALUES[index]:
+			remaining -= ROMAN_NUMERAL_VALUES[index]
+			result += ROMAN_NUMERAL_SYMBOLS[index]
+	return result
 
 func _status_name(status: int) -> String:
 	match status:

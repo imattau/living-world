@@ -32,6 +32,9 @@ func _summarize_world(world: WorldState, starting_population: int) -> Dictionary
 	var wars_declared := 0
 	var battles := 0
 	var peace_events := 0
+	var ruler_deaths := 0
+	var successions := 0
+	var succession_crises := 0
 	var events_with_facts := 0
 	var events_with_cause_links := 0
 	var maximum_dispute_score := 0.0
@@ -71,6 +74,12 @@ func _summarize_world(world: WorldState, starting_population: int) -> Dictionary
 				battles += 1
 			"peace_agreed":
 				peace_events += 1
+			"ruler_died":
+				ruler_deaths += 1
+			"ruler_succeeded":
+				successions += 1
+			"succession_crisis":
+				succession_crises += 1
 	var active_state_ids := {}
 	for settlement_value in world.settlements.values():
 		var settlement: SettlementData = settlement_value
@@ -89,6 +98,9 @@ func _summarize_world(world: WorldState, starting_population: int) -> Dictionary
 		"wars_declared": wars_declared,
 		"battles": battles,
 		"peace_events": peace_events,
+		"ruler_deaths": ruler_deaths,
+		"successions": successions,
+		"succession_crises": succession_crises,
 		"events_total": world.events.size(),
 		"events_with_facts_percent": 100.0 * float(events_with_facts) / maxf(1.0, float(world.events.size())),
 		"events_with_cause_links": events_with_cause_links,
@@ -120,6 +132,9 @@ func _summarize_collection(rows: Array[Dictionary]) -> Dictionary:
 	var total_wars := 0
 	var total_battles := 0
 	var total_peaces := 0
+	var total_ruler_deaths := 0
+	var total_successions := 0
+	var total_succession_crises := 0
 	for row in rows:
 		population_values.append(int(row["population_at_year_250"]))
 		initial_population_values.append(int(row["population_at_year_0"]))
@@ -142,6 +157,9 @@ func _summarize_collection(rows: Array[Dictionary]) -> Dictionary:
 		total_wars += int(row["wars_declared"])
 		total_battles += int(row["battles"])
 		total_peaces += int(row["peace_events"])
+		total_ruler_deaths += int(row["ruler_deaths"])
+		total_successions += int(row["successions"])
+		total_succession_crises += int(row["succession_crises"])
 	population_values.sort()
 	initial_population_values.sort()
 	surviving_values.sort()
@@ -179,4 +197,7 @@ func _summarize_collection(rows: Array[Dictionary]) -> Dictionary:
 		"wars_declared_total": total_wars,
 		"battles_total": total_battles,
 		"peace_events_total": total_peaces,
+		"ruler_deaths_total": total_ruler_deaths,
+		"successions_total": total_successions,
+		"succession_crises_total": total_succession_crises,
 	}
