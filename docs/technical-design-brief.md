@@ -261,14 +261,16 @@ These are acceptance scenarios for implementation; they do not prescribe a testi
 5. **History UI:** map, year controls, event chronicle, entity inspection, causes.
 6. **Persistence and rewind:** save/load, checkpoints, historical browsing.
 7. **Evaluation:** inspect multiple 250-year runs; tune for legible, explainable outcomes.
+8. **Intervention and evaluation:** schedule limited actions, persist and replay commands, and compare paired outcomes.
+9. **Causal history:** connect events to prior events and recorded conditions so the chronicle can explain how outcomes emerged.
 
-The prototype now includes one constrained intervention for evaluation: spend 1 Influence to send food aid to a selected active settlement. It is applied at the start of the following year, adds up to half a year of food need subject to store capacity, and is recorded as an event. Influence starts at 3, regenerates by 0.1 per year, and is capped at 5. This is a narrow experiment in indirect influence; further interventions, story detection, richer notable people, and optional narrative generation remain out of scope until its effect is evaluated.
+The prototype includes one constrained intervention: spend 1 Influence to send food aid to a selected active settlement. It is applied at the start of the following year, adds up to half a year of food need subject to store capacity, and is recorded as an event. Influence starts at 3, regenerates by 0.1 per year, and is capped at 5. A paired 20-seed evaluation found a small but consistently positive target-population difference; famine and survival outcomes were unchanged. Treat this as an initial signal, not a balance result, because the sample and current event measures cannot establish lasting famine relief. Further interventions remain deferred while event-causality records and stronger intervention evaluation signals are developed. Simulation version 4 identifies the intervention-capable rules.
 
 ## 15. Settled prototype defaults
 
 These choices are fixed for the first implementation. Tune numerical balance after observing generated histories, but preserve the formulas and bump `simulation_version` whenever a change alters outcomes.
 
-- **Engine/platform:** Godot 4.7.x stable (current maintenance release at the time of this brief); GDScript; desktop Linux first. No plugins or external runtime dependencies. No Godot executable is installed in the current workspace, so editor/runtime validation begins after one is available.
+- **Engine/platform:** Godot 4.7.x stable; GDScript; desktop Linux first. Godot 4.7.2 is available in the current development environment. Headless startup and paired evaluation run without script errors.
 - **Map storage:** parallel packed arrays in `MapData`, row-major indexing.
 - **Height/climate:** custom smooth value noise on fixed lattice scales, not engine noise classes. Sea threshold 0.38; three elevation octaves; two rainfall octaves.
 - **Rivers:** steepest-lower-neighbor D8 routing with deterministic tie-break; flow accumulation threshold 12. Closed basins are lakes.

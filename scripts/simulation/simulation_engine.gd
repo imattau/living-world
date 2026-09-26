@@ -101,7 +101,8 @@ func _apply_scheduled_commands(world: WorldState, year: int) -> void:
 		world.influence -= cost
 		settlement.food_store += amount
 		_record_event(world, "intervention_applied", year, settlement.region_id, [settlement_id], {
-			"intervention": "food_relief", "influence_cost": cost, "food_added": amount,
+			"intervention": "food_relief", "target_settlement_id": settlement_id,
+			"influence_cost": cost, "food_added": amount,
 			"target_population": settlement.population,
 		})
 
