@@ -15,6 +15,10 @@ var founding_year: int = 0
 var status: int = STATUS_HAMLET
 var population: int
 var food_store: float
+var food_coverage: float = 1.0
+var previous_food_coverage: float = 1.0
+var years_in_food_stress: int = 0
+var years_below_abandonment_threshold: int = 0
 var resource_stores := PackedFloat32Array()
 var occupational_shares := PackedFloat32Array()
 var culture_id: int = -1

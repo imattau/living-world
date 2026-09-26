@@ -10,7 +10,7 @@ var regions: Dictionary = {}
 var settlements: Dictionary = {}
 var cultures: Dictionary = {}
 var states: Dictionary = {}
-var events: Array[Dictionary] = []
+var events: Array[HistoryEvent] = []
 var next_entity_id: int = 1
 var next_event_id: int = 1
 

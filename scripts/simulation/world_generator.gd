@@ -385,6 +385,7 @@ func _create_settlements(world: WorldState, components: Dictionary) -> void:
 		settlement.region_id = map.region_id[cell_index]
 		settlement.land_component_id = component_ids[cell_index]
 		settlement.population = _society_rng.range_int(300, 1_200)
+		settlement.status = SettlementData.STATUS_HAMLET if settlement.population < 500 else SettlementData.STATUS_VILLAGE
 		settlement.food_store = float(settlement.population) * 0.5
 		settlement.site_cell_index = cell_index
 		settlement.fertility = map.fertility[cell_index]

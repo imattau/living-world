@@ -41,7 +41,7 @@ func _draw() -> void:
 		var settlement: SettlementData = settlement_value
 		var position := map.get_cell_position(settlement.site_cell_index)
 		var center := _map_origin + (Vector2(position) + Vector2(0.5, 0.5)) * _cell_size
-		var marker_radius := maxf(2.5, _cell_size * 0.27)
+		var marker_radius := maxf(2.5, _cell_size * (0.22 + minf(float(settlement.population) / 8_000.0, 0.12)))
 		draw_circle(center, marker_radius, Color("f4dfaa"))
 		draw_arc(center, marker_radius + 1.5, 0.0, TAU, 16, Color("19242c"), 1.0)
 

@@ -8,11 +8,11 @@ Generate a seeded world, simulate 200–250 years, and make its history interest
 
 ## Project status
 
-The project now includes a seeded terrain and society generator with an interactive map preview. Enter a seed and select **Generate world** to explore generated regions and inspect settlements. See [the design brief](docs/design-brief.md), [technical design overview](docs/technical-design.md), and [implementation-ready technical design brief](docs/technical-design-brief.md).
+The project includes a seeded terrain and society generator, an interactive map preview, annual food and population simulation, and a recent-history chronicle. Enter a seed, generate a world, then advance it one or ten years at a time. See [the design brief](docs/design-brief.md), [technical design overview](docs/technical-design.md), and [implementation-ready technical design brief](docs/technical-design-brief.md).
 
 ## Getting started
 
-Open this folder in Godot 4.7.x stable and run the project (Linux desktop is the first target). The current scene is an early world-generation prototype; annual simulation and historical browsing are next.
+Open this folder in Godot 4.7.x stable and run the project (Linux desktop is the first target). The current scene supports seeded generation and annual stepping; migration, trade, and historical browsing are next.
 
 ## Project layout
 
