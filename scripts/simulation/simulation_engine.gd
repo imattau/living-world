@@ -318,6 +318,14 @@ func _apply_migration(
 		for destination_id in destination_ids:
 			participants.append(int(destination_id))
 			destination_facts.append(int(destination_id))
+		var cause_links: Array[Dictionary] = []
+		var food_cause := _find_active_food_cause(world, origin_id)
+		if food_cause != null:
+			cause_links.append({
+				"category": "food_pressure",
+				"event_id": food_cause.id,
+				"strength": float(reports[origin_id]["food_coverage"]),
+			})
 		_record_event(
 			world,
 			"population_migrated",
@@ -330,7 +338,8 @@ func _apply_migration(
 				"destination_settlement_ids": destination_facts,
 				"cause": "food_pressure",
 			},
-			participants
+			participants,
+			cause_links
 		)
 
 func _apply_food_trade(world: WorldState, entity_ids: Array[int], year: int) -> void:
@@ -481,6 +490,19 @@ func _update_politics_and_conflict(world: WorldState, year: int) -> void:
 				second.at_war_with.append(first_id)
 				first.at_war_with.sort()
 				second.at_war_with.sort()
+				var cause_links: Array[Dictionary] = []
+				if resource_pressure > 0.05:
+					for state_id in [first_id, second_id]:
+						var worst_settlement_id := _worst_food_settlement(world, int(state_id))
+						if worst_settlement_id < 0:
+							continue
+						var food_cause := _find_active_food_cause(world, worst_settlement_id)
+						if food_cause != null:
+							cause_links.append({
+								"category": "resource_pressure",
+								"event_id": food_cause.id,
+								"strength": resource_pressure,
+							})
 				_record_event(
 					world,
 					"war_declared",
@@ -493,7 +515,8 @@ func _update_politics_and_conflict(world: WorldState, year: int) -> void:
 						"resource_pressure": resource_pressure,
 						"stability": [first.stability, second.stability],
 					},
-					[first_id, second_id]
+					[first_id, second_id],
+					cause_links
 				)
 				is_at_war = true
 			if is_at_war:
@@ -522,6 +545,14 @@ func _update_politics_and_conflict(world: WorldState, year: int) -> void:
 		_apply_state_casualties(world, loser_id, casualties)
 		winner.stability = clampf(winner.stability + 0.015, 0.0, 1.0)
 		loser.stability = clampf(loser.stability - 0.04, 0.0, 1.0)
+		var battle_cause_links: Array[Dictionary] = []
+		var war_declaration := _find_war_declaration_event(world, first_id, second_id)
+		if war_declaration != null:
+			battle_cause_links.append({
+				"category": "war_declared",
+				"event_id": war_declaration.id,
+				"strength": 1.0,
+			})
 		_record_event(
 			world,
 			"battle_resolved",
@@ -536,7 +567,8 @@ func _update_politics_and_conflict(world: WorldState, year: int) -> void:
 				"casualties": casualties,
 				"variance_factors": [first_variance, second_variance],
 			},
-			[winner_id, loser_id]
+			[winner_id, loser_id],
+			battle_cause_links
 		)
 		if loser.stability < 0.10:
 			first.at_war_with.erase(second_id)
@@ -570,6 +602,18 @@ func _state_population(world: WorldState, state_id: int) -> int:
 		if settlement.state_id == state_id and settlement.status != SettlementData.STATUS_ABANDONED:
 			total += settlement.population
 	return total
+
+func _worst_food_settlement(world: WorldState, state_id: int) -> int:
+	var worst_id := -1
+	var worst_coverage := INF
+	for settlement_id in _sorted_settlement_ids(world):
+		var settlement: SettlementData = world.settlements[settlement_id]
+		if settlement.state_id != state_id or settlement.status == SettlementData.STATUS_ABANDONED:
+			continue
+		if settlement.food_coverage < worst_coverage:
+			worst_coverage = settlement.food_coverage
+			worst_id = settlement_id
+	return worst_id
 
 func _state_military_strength(world: WorldState, state_id: int) -> float:
 	var strength := 0.0
@@ -669,13 +713,23 @@ func _update_settlement_status(world: WorldState, entity_ids: Array[int], year: 
 			settlement.years_below_abandonment_threshold = 0
 		if settlement.years_below_abandonment_threshold >= YEARS_BELOW_ABANDONMENT_THRESHOLD:
 			settlement.status = SettlementData.STATUS_ABANDONED
+			var cause_links: Array[Dictionary] = []
+			var food_cause := _find_active_food_cause(world, settlement.id)
+			if food_cause != null:
+				cause_links.append({
+					"category": "food_pressure",
+					"event_id": food_cause.id,
+					"strength": settlement.food_coverage,
+				})
 			_record_event(
 				world,
 				"settlement_abandoned",
 				year,
 				settlement.region_id,
 				[settlement.id],
-				{"population": settlement.population, "years_below_threshold": settlement.years_below_abandonment_threshold}
+				{"population": settlement.population, "years_below_threshold": settlement.years_below_abandonment_threshold},
+				[],
+				cause_links
 			)
 			continue
 
@@ -754,8 +808,9 @@ func _record_event(
 	region_id: int,
 	subject_ids: Array[int],
 	facts: Dictionary,
-	participant_ids: Array[int] = []
-) -> void:
+	participant_ids: Array[int] = [],
+	cause_links: Array[Dictionary] = []
+) -> int:
 	var event := HistoryEvent.new()
 	event.id = world.next_event_id
 	world.next_event_id += 1
@@ -767,7 +822,43 @@ func _record_event(
 	for participant_id in participant_ids:
 		event.participant_ids.append(participant_id)
 	event.facts = facts.duplicate(true)
+	event.cause_links = cause_links.duplicate(true)
 	_pending_events.append(event)
+	return event.id
+
+# Finds the most recent event of the given types that names `subject_id`
+# among its subjects, searching this year's not-yet-committed events first
+# and then the world's committed history. Used to link an outcome (a
+# migration, a war, an abandonment) back to the condition that caused it.
+func _find_causal_event(world: WorldState, event_types: Array[String], subject_id: int) -> HistoryEvent:
+	for index in range(_pending_events.size() - 1, -1, -1):
+		var event: HistoryEvent = _pending_events[index]
+		if event_types.has(event.type) and event.subject_ids.has(subject_id):
+			return event
+	for index in range(world.events.size() - 1, -1, -1):
+		var event: HistoryEvent = world.events[index]
+		if event_types.has(event.type) and event.subject_ids.has(subject_id):
+			return event
+	return null
+
+func _find_active_food_cause(world: WorldState, settlement_id: int) -> HistoryEvent:
+	var event := _find_causal_event(
+		world, ["famine_began", "harvest_failure", "harvest_recovery"], settlement_id
+	)
+	if event == null or event.type == "harvest_recovery":
+		return null
+	return event
+
+func _find_war_declaration_event(world: WorldState, first_state_id: int, second_state_id: int) -> HistoryEvent:
+	for index in range(_pending_events.size() - 1, -1, -1):
+		var event: HistoryEvent = _pending_events[index]
+		if event.type == "war_declared" and event.subject_ids.has(first_state_id) and event.subject_ids.has(second_state_id):
+			return event
+	for index in range(world.events.size() - 1, -1, -1):
+		var event: HistoryEvent = world.events[index]
+		if event.type == "war_declared" and event.subject_ids.has(first_state_id) and event.subject_ids.has(second_state_id):
+			return event
+	return null
 
 func _carrying_capacity(settlement: SettlementData) -> float:
 	var freshwater_bonus := 300.0 if settlement.freshwater_adjacent else 0.0
