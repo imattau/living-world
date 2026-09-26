@@ -23,6 +23,16 @@ const CRISIS_STABILITY_PENALTY := 0.12
 const PEACEFUL_SUCCESSION_STABILITY_BONUS := 0.02
 const HEIR_MIN_AGE := 20
 const HEIR_MAX_AGE := 35
+const FRAGMENTATION_STABILITY_THRESHOLD := 0.10
+const YEARS_BELOW_FRAGMENTATION_THRESHOLD := 5
+const FRAGMENTATION_MIN_SETTLEMENTS := 2
+const FRAGMENTATION_SUCCESSOR_COUNT_SMALL := 2
+const FRAGMENTATION_SUCCESSOR_COUNT_LARGE := 3
+const FRAGMENTATION_LARGE_SPLIT_MIN_SETTLEMENTS := 5
+const NEW_STATE_LEADER_AGE := 30
+const NEW_STATE_STABILITY_FRAGMENT := 0.5
+const FORMATION_STATE_STABILITY := 0.6
+const FORMATION_POPULATION_THRESHOLD := 400
 
 var last_year_events: Array[HistoryEvent] = []
 var _pending_events: Array[HistoryEvent] = []
@@ -44,6 +54,8 @@ func advance_year(world: WorldState) -> Array[HistoryEvent]:
 	_apply_food_trade(world, entity_ids, target_year)
 	_update_politics_and_conflict(world, target_year)
 	_update_leadership(world, target_year)
+	_update_state_cohesion(world, target_year)
+	_update_territorial_growth(world, target_year)
 	world.influence = minf(INFLUENCE_CAP, world.influence + INFLUENCE_REGEN_PER_YEAR)
 	world.year = target_year
 	for event in _pending_events:
@@ -462,7 +474,7 @@ func _apply_food_trade(world: WorldState, entity_ids: Array[int], year: int) -> 
 		)
 
 func _update_politics_and_conflict(world: WorldState, year: int) -> void:
-	var state_ids := _sorted_integer_keys(world.states)
+	var state_ids := _active_state_ids(world)
 	if state_ids.size() < 2:
 		return
 	var food_pressure_by_state := {}
@@ -565,7 +577,7 @@ func _update_politics_and_conflict(world: WorldState, year: int) -> void:
 				"event_id": war_declaration.id,
 				"strength": 1.0,
 			})
-		_record_event(
+		var battle_event_id := _record_event(
 			world,
 			"battle_resolved",
 			year,
@@ -582,6 +594,7 @@ func _update_politics_and_conflict(world: WorldState, year: int) -> void:
 			[winner_id, loser_id],
 			battle_cause_links
 		)
+		_apply_annexation(world, year, int(pair["region"]), winner_id, loser_id, battle_event_id)
 		if loser.stability < 0.10:
 			first.at_war_with.erase(second_id)
 			second.at_war_with.erase(first_id)
@@ -595,8 +608,72 @@ func _update_politics_and_conflict(world: WorldState, year: int) -> void:
 				[winner_id, loser_id]
 			)
 
+func _active_state_ids(world: WorldState) -> Array[int]:
+	var active_ids: Array[int] = []
+	for state_id in _sorted_integer_keys(world.states):
+		var state: StateData = world.states[state_id]
+		if not state.settlement_ids.is_empty():
+			active_ids.append(state_id)
+	return active_ids
+
+func _apply_annexation(
+	world: WorldState, year: int, border_region_id: int, winner_id: int, loser_id: int, battle_event_id: int
+) -> void:
+	if not world.regions.has(border_region_id):
+		return
+	var border_region: RegionData = world.regions[border_region_id]
+	if border_region.controlling_state_id != loser_id:
+		return
+	var winner: StateData = world.states[winner_id]
+	var loser: StateData = world.states[loser_id]
+	var settlements_in_region: Array[int] = []
+	for settlement_id in border_region.settlement_ids:
+		if not world.settlements.has(settlement_id):
+			continue
+		var settlement: SettlementData = world.settlements[settlement_id]
+		if settlement.state_id == loser_id:
+			settlements_in_region.append(settlement_id)
+	if settlements_in_region.is_empty():
+		return
+	var loser_remaining := 0
+	for settlement_id in loser.settlement_ids:
+		if settlements_in_region.has(settlement_id):
+			continue
+		var settlement: SettlementData = world.settlements[settlement_id]
+		if settlement.status != SettlementData.STATUS_ABANDONED:
+			loser_remaining += 1
+	if loser_remaining <= 0:
+		return
+
+	border_region.controlling_state_id = winner_id
+	if not winner.region_ids.has(border_region_id):
+		winner.region_ids.append(border_region_id)
+		winner.region_ids.sort()
+	loser.region_ids.erase(border_region_id)
+	for settlement_id in settlements_in_region:
+		var settlement: SettlementData = world.settlements[settlement_id]
+		settlement.state_id = winner_id
+		loser.settlement_ids.erase(settlement_id)
+		winner.settlement_ids.append(settlement_id)
+	winner.settlement_ids.sort()
+	_record_event(
+		world,
+		"territory_annexed",
+		year,
+		border_region_id,
+		[winner_id, loser_id],
+		{
+			"region_id": border_region_id,
+			"from_state_id": loser_id,
+			"to_state_id": winner_id,
+			"settlement_ids": settlements_in_region.duplicate(),
+		},
+		[winner_id, loser_id],
+		[{"category": "battle_resolved", "event_id": battle_event_id, "strength": 1.0}]
+	)
+
 func _update_leadership(world: WorldState, year: int) -> void:
-	var state_ids := _sorted_integer_keys(world.states)
+	var state_ids := _active_state_ids(world)
 	if state_ids.is_empty():
 		return
 	var rng := SeededRandom.new(
@@ -685,6 +762,255 @@ func _state_home_region(world: WorldState, state_id: int) -> int:
 	if not state.region_ids.is_empty():
 		return state.region_ids[0]
 	return -1
+
+func _update_state_cohesion(world: WorldState, year: int) -> void:
+	for state_id in _active_state_ids(world):
+		var state: StateData = world.states[state_id]
+		if state.stability < FRAGMENTATION_STABILITY_THRESHOLD:
+			state.years_below_fragmentation_threshold += 1
+		else:
+			state.years_below_fragmentation_threshold = 0
+		if state.years_below_fragmentation_threshold < YEARS_BELOW_FRAGMENTATION_THRESHOLD:
+			continue
+		if state.settlement_ids.size() < FRAGMENTATION_MIN_SETTLEMENTS:
+			continue
+		var successor_count := FRAGMENTATION_SUCCESSOR_COUNT_SMALL
+		if state.settlement_ids.size() >= FRAGMENTATION_LARGE_SPLIT_MIN_SETTLEMENTS:
+			successor_count = FRAGMENTATION_SUCCESSOR_COUNT_LARGE
+		if world.states.size() - 1 + successor_count > world.max_states:
+			successor_count = FRAGMENTATION_SUCCESSOR_COUNT_SMALL
+		if world.states.size() - 1 + successor_count > world.max_states:
+			continue
+		_fragment_state(world, year, state_id, successor_count)
+
+func _fragment_state(world: WorldState, year: int, state_id: int, successor_count: int) -> void:
+	var state: StateData = world.states[state_id]
+	var clusters := _cluster_settlements(world, state.settlement_ids, successor_count)
+	if clusters.size() < 2:
+		return
+
+	var home_region_id := _state_home_region(world, state_id)
+	var stability_before := state.stability
+	var affected_settlement_ids := state.settlement_ids.duplicate()
+	var successor_ids: Array[int] = []
+	for cluster in clusters:
+		var successor := StateData.new()
+		successor.id = world.allocate_entity_id()
+		successor.name = "%s-%d" % [state.name, successor_ids.size() + 1]
+		successor.government_type = state.government_type
+		successor.leader_id = world.allocate_entity_id()
+		successor.leader_since_year = year
+		successor.leader_age = NEW_STATE_LEADER_AGE
+		successor.stability = NEW_STATE_STABILITY_FRAGMENT
+		for settlement_id in cluster:
+			var settlement: SettlementData = world.settlements[settlement_id]
+			settlement.state_id = successor.id
+			successor.settlement_ids.append(settlement_id)
+		successor.settlement_ids.sort()
+		world.states[successor.id] = successor
+		successor_ids.append(successor.id)
+
+	var affected_region_ids := {}
+	for settlement_id in affected_settlement_ids:
+		var settlement: SettlementData = world.settlements[settlement_id]
+		affected_region_ids[settlement.region_id] = true
+	_reassign_region_control(world, affected_settlement_ids)
+	var affected_state_ids := {}
+	affected_state_ids[state_id] = true
+	for successor_id in successor_ids:
+		affected_state_ids[successor_id] = true
+	for region_id in affected_region_ids.keys():
+		var region: RegionData = world.regions[region_id]
+		if region.controlling_state_id >= 0:
+			affected_state_ids[region.controlling_state_id] = true
+	_rebuild_region_ids(world, _sorted_integer_keys(affected_state_ids))
+
+	state.settlement_ids.clear()
+	state.dissolved_year = year
+	state.years_below_fragmentation_threshold = 0
+
+	var cause_links: Array[Dictionary] = []
+	var crisis_cause := _find_causal_event(world, ["succession_crisis"], state_id)
+	if crisis_cause != null:
+		cause_links.append({
+			"category": "succession_crisis",
+			"event_id": crisis_cause.id,
+			"strength": stability_before,
+		})
+	var battle_cause := _find_causal_event(world, ["battle_resolved"], state_id)
+	if battle_cause != null and int(battle_cause.facts.get("loser_state_id", -1)) == state_id:
+		cause_links.append({
+			"category": "military_defeat",
+			"event_id": battle_cause.id,
+			"strength": stability_before,
+		})
+	_record_event(
+		world,
+		"state_fragmented",
+		year,
+		home_region_id,
+		[state_id],
+		{
+			"parent_state_id": state_id,
+			"successor_state_ids": successor_ids.duplicate(),
+			"stability_before": stability_before,
+		},
+		successor_ids,
+		cause_links
+	)
+
+func _cluster_settlements(world: WorldState, settlement_ids: Array[int], cluster_count: int) -> Array:
+	var ids := settlement_ids.duplicate()
+	ids.sort()
+	if ids.size() < cluster_count:
+		cluster_count = ids.size()
+	if cluster_count < 2:
+		return []
+	var anchors: Array[int] = [ids[0]]
+	while anchors.size() < cluster_count:
+		var farthest_id := -1
+		var farthest_distance := -1
+		for candidate_id in ids:
+			if anchors.has(candidate_id):
+				continue
+			var candidate: SettlementData = world.settlements[candidate_id]
+			var candidate_pos := world.map.get_cell_position(candidate.site_cell_index)
+			var nearest_distance := 1_000_000
+			for anchor_id in anchors:
+				var anchor: SettlementData = world.settlements[anchor_id]
+				var anchor_pos := world.map.get_cell_position(anchor.site_cell_index)
+				nearest_distance = mini(
+					nearest_distance,
+					absi(candidate_pos.x - anchor_pos.x) + absi(candidate_pos.y - anchor_pos.y)
+				)
+			if nearest_distance > farthest_distance:
+				farthest_distance = nearest_distance
+				farthest_id = candidate_id
+		if farthest_id < 0:
+			break
+		anchors.append(farthest_id)
+
+	var clusters: Array = []
+	for anchor_id in anchors:
+		var cluster: Array[int] = [anchor_id]
+		clusters.append(cluster)
+	for settlement_id in ids:
+		if anchors.has(settlement_id):
+			continue
+		var settlement: SettlementData = world.settlements[settlement_id]
+		var settlement_pos := world.map.get_cell_position(settlement.site_cell_index)
+		var best_anchor_index := 0
+		var best_distance := 1_000_000
+		for anchor_index in anchors.size():
+			var anchor: SettlementData = world.settlements[anchors[anchor_index]]
+			var anchor_pos := world.map.get_cell_position(anchor.site_cell_index)
+			var distance := absi(settlement_pos.x - anchor_pos.x) + absi(settlement_pos.y - anchor_pos.y)
+			if distance < best_distance:
+				best_distance = distance
+				best_anchor_index = anchor_index
+		var target_cluster: Array[int] = clusters[best_anchor_index]
+		target_cluster.append(settlement_id)
+	return clusters
+
+func _reassign_region_control(world: WorldState, settlement_ids: Array[int]) -> void:
+	var region_ids := {}
+	for settlement_id in settlement_ids:
+		if not world.settlements.has(settlement_id):
+			continue
+		var settlement: SettlementData = world.settlements[settlement_id]
+		region_ids[settlement.region_id] = true
+	for region_id in _sorted_integer_keys(region_ids):
+		var region: RegionData = world.regions[region_id]
+		var population_by_state := {}
+		for member_id in region.settlement_ids:
+			if not world.settlements.has(member_id):
+				continue
+			var member: SettlementData = world.settlements[member_id]
+			if member.state_id < 0 or member.status == SettlementData.STATUS_ABANDONED:
+				continue
+			population_by_state[member.state_id] = (
+				int(population_by_state.get(member.state_id, 0)) + member.population
+			)
+		var candidate_state_ids := _sorted_integer_keys(population_by_state)
+		var controlling_id := -1
+		var largest_population := -1
+		for candidate_state_id in candidate_state_ids:
+			var population: int = population_by_state[candidate_state_id]
+			if population > largest_population:
+				largest_population = population
+				controlling_id = candidate_state_id
+		region.controlling_state_id = controlling_id
+
+func _rebuild_region_ids(world: WorldState, state_ids: Array[int]) -> void:
+	for state_id in state_ids:
+		if world.states.has(state_id):
+			var state: StateData = world.states[state_id]
+			state.region_ids.clear()
+	for region_id in _sorted_integer_keys(world.regions):
+		var region: RegionData = world.regions[region_id]
+		if region.controlling_state_id >= 0 and state_ids.has(region.controlling_state_id):
+			if world.states.has(region.controlling_state_id):
+				var state: StateData = world.states[region.controlling_state_id]
+				state.region_ids.append(region.id)
+	for state_id in state_ids:
+		if world.states.has(state_id):
+			world.states[state_id].region_ids.sort()
+
+func _update_territorial_growth(world: WorldState, year: int) -> void:
+	if world.states.size() >= world.max_states:
+		return
+	for region_id in _sorted_integer_keys(world.regions):
+		if world.states.size() >= world.max_states:
+			return
+		var region: RegionData = world.regions[region_id]
+		if region.controlling_state_id >= 0:
+			continue
+		var population := 0
+		var capital_id := -1
+		var capital_population := -1
+		var candidate_settlement_ids: Array[int] = []
+		for settlement_id in region.settlement_ids:
+			if not world.settlements.has(settlement_id):
+				continue
+			var settlement: SettlementData = world.settlements[settlement_id]
+			if settlement.status == SettlementData.STATUS_ABANDONED or settlement.state_id >= 0:
+				continue
+			population += settlement.population
+			candidate_settlement_ids.append(settlement_id)
+			if settlement.population > capital_population:
+				capital_population = settlement.population
+				capital_id = settlement_id
+		if population < FORMATION_POPULATION_THRESHOLD or capital_id < 0:
+			continue
+
+		var new_state := StateData.new()
+		new_state.id = world.allocate_entity_id()
+		new_state.name = "State %d" % new_state.id
+		new_state.government_type = "chiefdom"
+		new_state.leader_id = world.allocate_entity_id()
+		new_state.leader_since_year = year
+		new_state.leader_age = NEW_STATE_LEADER_AGE
+		new_state.stability = FORMATION_STATE_STABILITY
+		for settlement_id in candidate_settlement_ids:
+			var settlement: SettlementData = world.settlements[settlement_id]
+			settlement.state_id = new_state.id
+			new_state.settlement_ids.append(settlement_id)
+		new_state.settlement_ids.sort()
+		region.controlling_state_id = new_state.id
+		new_state.region_ids.append(region.id)
+		world.states[new_state.id] = new_state
+		_record_event(
+			world,
+			"state_founded",
+			year,
+			region.id,
+			[new_state.id],
+			{
+				"region_id": region.id,
+				"capital_settlement_id": capital_id,
+				"founding_population": population,
+			}
+		)
 
 func _state_food_pressure(world: WorldState, state_id: int) -> float:
 	var weighted_pressure := 0.0

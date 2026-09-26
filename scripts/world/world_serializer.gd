@@ -92,6 +92,8 @@ static func to_state_dictionary(world: WorldState) -> Dictionary:
 			"leader_age": state.leader_age,
 			"leader_ordinal": state.leader_ordinal,
 			"succession_rule": state.succession_rule,
+			"years_below_fragmentation_threshold": state.years_below_fragmentation_threshold,
+			"dissolved_year": state.dissolved_year,
 			"treasury": state.treasury,
 			"stability": state.stability,
 			"relationships": relationship_records,
@@ -107,6 +109,7 @@ static func to_state_dictionary(world: WorldState) -> Dictionary:
 		"command_cursor": world.command_cursor,
 		"next_command_sequence": world.next_command_sequence,
 		"influence": world.influence,
+		"max_states": world.max_states,
 		"map": _map_to_dictionary(world.map),
 		"regions": regions,
 		"settlements": settlements,
@@ -171,6 +174,7 @@ static func from_state_dictionary(data: Dictionary) -> Dictionary:
 	world.command_cursor = int(data.get("command_cursor", 0))
 	world.next_command_sequence = int(data.get("next_command_sequence", 1))
 	world.influence = float(data.get("influence", 3.0))
+	world.max_states = int(data.get("max_states", 999_999))
 	world.map = _map_from_dictionary(data["map"])
 	if world.map == null:
 		return {"error": "World checkpoint map data is incomplete."}
@@ -229,6 +233,8 @@ static func from_state_dictionary(data: Dictionary) -> Dictionary:
 		state.leader_since_year = int(state_data.get("leader_since_year", 0))
 		state.leader_age = int(state_data.get("leader_age", 30))
 		state.leader_ordinal = int(state_data.get("leader_ordinal", 1))
+		state.years_below_fragmentation_threshold = int(state_data.get("years_below_fragmentation_threshold", 0))
+		state.dissolved_year = int(state_data.get("dissolved_year", -1))
 		state.succession_rule = str(state_data.get("succession_rule", "hereditary"))
 		state.treasury = float(state_data["treasury"])
 		state.stability = float(state_data["stability"])

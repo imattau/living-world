@@ -35,6 +35,9 @@ func _summarize_world(world: WorldState, starting_population: int) -> Dictionary
 	var ruler_deaths := 0
 	var successions := 0
 	var succession_crises := 0
+	var territories_annexed := 0
+	var states_fragmented := 0
+	var states_founded := 0
 	var events_with_facts := 0
 	var events_with_cause_links := 0
 	var maximum_dispute_score := 0.0
@@ -80,6 +83,12 @@ func _summarize_world(world: WorldState, starting_population: int) -> Dictionary
 				successions += 1
 			"succession_crisis":
 				succession_crises += 1
+			"territory_annexed":
+				territories_annexed += 1
+			"state_fragmented":
+				states_fragmented += 1
+			"state_founded":
+				states_founded += 1
 	var active_state_ids := {}
 	for settlement_value in world.settlements.values():
 		var settlement: SettlementData = settlement_value
@@ -101,6 +110,9 @@ func _summarize_world(world: WorldState, starting_population: int) -> Dictionary
 		"ruler_deaths": ruler_deaths,
 		"successions": successions,
 		"succession_crises": succession_crises,
+		"territories_annexed": territories_annexed,
+		"states_fragmented": states_fragmented,
+		"states_founded": states_founded,
 		"events_total": world.events.size(),
 		"events_with_facts_percent": 100.0 * float(events_with_facts) / maxf(1.0, float(world.events.size())),
 		"events_with_cause_links": events_with_cause_links,
@@ -135,6 +147,9 @@ func _summarize_collection(rows: Array[Dictionary]) -> Dictionary:
 	var total_ruler_deaths := 0
 	var total_successions := 0
 	var total_succession_crises := 0
+	var total_territories_annexed := 0
+	var total_states_fragmented := 0
+	var total_states_founded := 0
 	for row in rows:
 		population_values.append(int(row["population_at_year_250"]))
 		initial_population_values.append(int(row["population_at_year_0"]))
@@ -160,6 +175,9 @@ func _summarize_collection(rows: Array[Dictionary]) -> Dictionary:
 		total_ruler_deaths += int(row["ruler_deaths"])
 		total_successions += int(row["successions"])
 		total_succession_crises += int(row["succession_crises"])
+		total_territories_annexed += int(row["territories_annexed"])
+		total_states_fragmented += int(row["states_fragmented"])
+		total_states_founded += int(row["states_founded"])
 	population_values.sort()
 	initial_population_values.sort()
 	surviving_values.sort()
@@ -200,4 +218,7 @@ func _summarize_collection(rows: Array[Dictionary]) -> Dictionary:
 		"ruler_deaths_total": total_ruler_deaths,
 		"successions_total": total_successions,
 		"succession_crises_total": total_succession_crises,
+		"territories_annexed_total": total_territories_annexed,
+		"states_fragmented_total": total_states_fragmented,
+		"states_founded_total": total_states_founded,
 	}

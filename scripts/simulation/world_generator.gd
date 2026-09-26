@@ -44,6 +44,7 @@ func generate(world_seed: int) -> WorldState:
 	_create_settlements(world, components)
 	_assign_cultures_by_origin(world, components)
 	_create_initial_states(world, components)
+	world.max_states = maxi(2, world.states.size() * 2)
 	_recalculate_region_summaries(world)
 	world.snapshots.append(WorldSerializer.make_checkpoint(world))
 	return world

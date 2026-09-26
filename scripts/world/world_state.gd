@@ -10,6 +10,7 @@ var regions: Dictionary = {}
 var settlements: Dictionary = {}
 var cultures: Dictionary = {}
 var states: Dictionary = {}
+var max_states: int = 999_999
 var events: Array[HistoryEvent] = []
 var snapshots: Array[Dictionary] = []
 var command_log: Array[Dictionary] = []
