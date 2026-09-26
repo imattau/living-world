@@ -41,6 +41,8 @@ func _reset_from_source(source_world: WorldState, target_year: int) -> void:
 		var decoded := WorldSerializer.from_state_dictionary(checkpoint["state"])
 		if decoded.has("world"):
 			_cached_world = decoded["world"]
+			_cached_world.command_log = source_world.command_log.duplicate(true)
+			_cached_world.command_cursor = clampi(int(checkpoint.get("command_cursor", _cached_world.command_cursor)), 0, _cached_world.command_log.size())
 			var event_cursor := clampi(int(checkpoint.get("event_cursor", 0)), 0, source_world.events.size())
 			for event_index in event_cursor:
 				_cached_world.events.append(source_world.events[event_index])
@@ -51,4 +53,6 @@ func _reset_from_source(source_world: WorldState, target_year: int) -> void:
 		_cached_world = WorldGenerator.new().generate(source_world.seed)
 		_cached_world.generator_version = source_world.generator_version
 		_cached_world.simulation_version = source_world.simulation_version
+		_cached_world.command_log = source_world.command_log.duplicate(true)
+		_cached_world.command_cursor = 0
 	_cached_engine = SimulationEngine.new()

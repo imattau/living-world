@@ -9,7 +9,7 @@
 
 Build a deterministic world simulation that can generate a seeded setting, advance it through 250 years, and let a player inspect what changed and why. Geography should constrain resources and settlement; population and political rules should produce events; event records should preserve enough evidence to explain those outcomes.
 
-The first deliverable is a simulation with an inspection UI, not a complete strategy game. Player intervention, story notifications, rich character simulation, and AI narration are later milestones.
+The first deliverable is a simulation with an inspection UI, not a complete strategy game. Limited player intervention is the first follow-on milestone; story notifications, rich character simulation, and AI narration remain later.
 
 ## 2. Product requirements
 
@@ -65,7 +65,7 @@ Owns world generation, deterministic random streams, phase scheduling, rules, an
 
 ### Presentation
 
-Renders read-only world data and sends explicit commands such as `advance_years(count)` or (in a later milestone) `apply_intervention(command)`. It must not implement simulation rules.
+Renders world data and sends explicit commands such as `advance_years(count)` and `queue_food_relief(settlement_id)`. It must not implement simulation rules.
 
 Use typed GDScript classes in `scripts/world/` for model records and `RefCounted` services in `scripts/simulation/`. Use `Node` only for application lifecycle and presentation. Avoid using `.tscn` resources as the authoritative storage for generated world entities.
 
@@ -217,7 +217,7 @@ Generation algorithms should favor explainable inputs over artistic perfection. 
 
 Current world state alone cannot provide rewind. Store a full serialized state snapshot at year 0 and every 25 years. Each snapshot includes all mutable entity/map values plus the event-log cursor and command-log cursor. For an inspected year, load the nearest earlier snapshot into a separate world instance and replay at most 24 annual ticks. The live simulation head is never mutated by timeline scrubbing. Once interventions exist, store commands ordered by `(year, sequence_number)` and replay them at the start of their recorded year.
 
-Use a single versioned JSON save at `user://saves/living-world.json` for the prototype. Store the current state, append-only event log, snapshots, seed, and generator/simulation versions. Entity tables are arrays sorted by ID; map fields use JSON arrays. This favors inspectability over compactness at 48×48 scale. The command log is deferred until interventions exist. Do not adopt SQLite until measured save size or event query latency requires it. Reject unsupported save versions with a clear message; do not silently migrate or drop data.
+Use a single versioned JSON save at `user://saves/living-world.json` for the prototype. Store the current state, append-only event and command logs, snapshots, seed, and generator/simulation versions. Entity tables are arrays sorted by ID; map fields use JSON arrays. This favors inspectability over compactness at 48×48 scale. Commands are ordered by sequence number and scheduled for a year; they execute before that year's simulation phases. Checkpoints store the command cursor while the command log remains global, so historical replay reproduces interventions. Do not adopt SQLite until measured save size or event query latency requires it. Reject unsupported save versions with a clear message; do not silently migrate or drop data.
 
 ## 10. Presentation and user flow
 
@@ -262,7 +262,7 @@ These are acceptance scenarios for implementation; they do not prescribe a testi
 6. **Persistence and rewind:** save/load, checkpoints, historical browsing.
 7. **Evaluation:** inspect multiple 250-year runs; tune for legible, explainable outcomes.
 
-Only after the prototype produces histories worth inspecting should intervention, story detection, richer notable people, or optional narrative generation enter scope.
+The prototype now includes one constrained intervention for evaluation: spend 1 Influence to send food aid to a selected active settlement. It is applied at the start of the following year, adds up to half a year of food need subject to store capacity, and is recorded as an event. Influence starts at 3, regenerates by 0.1 per year, and is capped at 5. This is a narrow experiment in indirect influence; further interventions, story detection, richer notable people, and optional narrative generation remain out of scope until its effect is evaluated.
 
 ## 15. Settled prototype defaults
 
@@ -284,7 +284,7 @@ These choices are fixed for the first implementation. Tune numerical balance aft
 - **Politics:** state food pressure is the population-weighted share of unmet coverage below 0.75. Stability drifts by `(0.35 − pressure) × 0.01` per year, clamped to 0–1. Border pairs record dispute score, claim status, and resource pressure in symmetric relationship records. A contested claim exists when a settlement belonging to one state sits in a region controlled by the other. Resource pressure is three times the higher of the two states' food-pressure values, capped at 1. The score is 0.25 for border adjacency, plus 0.35 for a contested claim, plus up to 0.40 for pressure. Declare war at 0.70 when both states have stability at least 0.25.
 - **Conflict:** dispute score starts from border adjacency (0.25), a contested-region claim (0.35), and resource pressure (up to 0.40). War can be declared at score ≥0.70 when both states have stability ≥0.25. Resolve one coarse engagement per neighboring pair per year from population weighted by food coverage, with seeded opposing strength factors in the 0.85–1.15 range. The lower-scoring state loses 0.2% of its population, distributed proportionally; the winner gains 0.015 stability and loser loses 0.04. Record score inputs, strengths, variance, and casualties in event facts. Agree peace if the losing state falls below 0.10 stability. This model does not transfer territory.
 - **Historical state:** the UI rebuilds an inspection-only world from the latest year-0 or 25-year checkpoint not later than the selected year, then replays at most 24 ticks. It keeps the live world untouched.
-- **Save format:** one versioned JSON file at `user://saves/living-world.json`, with sorted entity arrays, map arrays, event history, and snapshots. Command-log persistence is deferred until interventions exist. No SQLite for the prototype.
+- **Save format:** one versioned JSON file at `user://saves/living-world.json`, with sorted entity arrays, map arrays, event and command history, and snapshots. No SQLite for the prototype.
 - **Presentation target:** desktop at 1280×720, mouse and keyboard; renderer stays on the current compatibility setting until visuals require another choice.
 
 Values above are starting balance parameters, not claims of realism. The first 20-seed, 250-year baseline has been run; results, limitations, and reproduction steps are in [the year-250 evaluation report](evaluation/year-250-baseline.md). Change values based on future observations and increment the simulation version whenever rules change outcomes. Godot 4.7.2 is the current stable maintenance release in the official release archive; track the latest stable 4.7 patch while avoiding development builds. [Godot release archive](https://godotengine.org/download/archive/).

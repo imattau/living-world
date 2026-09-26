@@ -6,6 +6,10 @@ const CONFLICT_STREAM_ID := 7
 const FOOD_YIELD_PER_PERSON := 1.2
 const FOOD_NEED_PER_PERSON := 1.0
 const FOOD_STORE_CAP_YEARS := 2.0
+const INFLUENCE_CAP := 5.0
+const INFLUENCE_REGEN_PER_YEAR := 0.1
+const FOOD_RELIEF_INFLUENCE_COST := 1.0
+const FOOD_RELIEF_NEED_FRACTION := 0.5
 const ABANDONMENT_POPULATION := 25
 const YEARS_BELOW_ABANDONMENT_THRESHOLD := 5
 
@@ -19,6 +23,7 @@ func advance_year(world: WorldState) -> Array[HistoryEvent]:
 		return last_year_events
 
 	var target_year := world.year + 1
+	_apply_scheduled_commands(world, target_year)
 	var entity_ids := _sorted_settlement_ids(world)
 	var weather := _sample_annual_weather(world, entity_ids, target_year)
 	var reports := _calculate_harvests(world, entity_ids, weather)
@@ -27,6 +32,7 @@ func advance_year(world: WorldState) -> Array[HistoryEvent]:
 	_update_settlement_status(world, entity_ids, target_year)
 	_apply_food_trade(world, entity_ids, target_year)
 	_update_politics_and_conflict(world, target_year)
+	world.influence = minf(INFLUENCE_CAP, world.influence + INFLUENCE_REGEN_PER_YEAR)
 	world.year = target_year
 	for event in _pending_events:
 		world.events.append(event)
@@ -34,6 +40,70 @@ func advance_year(world: WorldState) -> Array[HistoryEvent]:
 	if world.year > 0 and world.year % 25 == 0:
 		world.snapshots.append(WorldSerializer.make_checkpoint(world))
 	return last_year_events.duplicate()
+
+func available_influence(world: WorldState) -> float:
+	if world == null:
+		return 0.0
+	var reserved := 0.0
+	for command_index in range(world.command_cursor, world.command_log.size()):
+		reserved += float(world.command_log[command_index].get("influence_cost", 0.0))
+	return maxf(0.0, world.influence - reserved)
+
+func queue_food_relief(world: WorldState, settlement_id: int) -> Dictionary:
+	if world == null or not world.settlements.has(settlement_id):
+		return {"ok": false, "message": "Choose a settlement first."}
+	var settlement: SettlementData = world.settlements[settlement_id]
+	if settlement.status == SettlementData.STATUS_ABANDONED or settlement.population <= 0:
+		return {"ok": false, "message": "Abandoned settlements cannot receive food aid."}
+	if available_influence(world) < FOOD_RELIEF_INFLUENCE_COST:
+		return {"ok": false, "message": "Not enough Influence. Aid costs 1 point."}
+	var command := {
+		"sequence_number": world.next_command_sequence,
+		"execute_year": world.year + 1,
+		"type": "food_relief",
+		"target_settlement_id": settlement_id,
+		"influence_cost": FOOD_RELIEF_INFLUENCE_COST,
+	}
+	world.next_command_sequence += 1
+	world.command_log.append(command)
+	return {"ok": true, "message": "Food aid scheduled for year %d." % int(command["execute_year"])}
+
+func _apply_scheduled_commands(world: WorldState, year: int) -> void:
+	while world.command_cursor < world.command_log.size():
+		var command: Dictionary = world.command_log[world.command_cursor]
+		if int(command.get("execute_year", 0)) > year:
+			break
+		world.command_cursor += 1
+		if str(command.get("type", "")) != "food_relief":
+			continue
+		var settlement_id := int(command.get("target_settlement_id", -1))
+		var cost := float(command.get("influence_cost", FOOD_RELIEF_INFLUENCE_COST))
+		if not world.settlements.has(settlement_id):
+			continue
+		var settlement: SettlementData = world.settlements[settlement_id]
+		if settlement.status == SettlementData.STATUS_ABANDONED or settlement.population <= 0:
+			_record_event(world, "intervention_failed", year, settlement.region_id, [settlement_id], {
+				"intervention": "food_relief", "reason": "target_unavailable", "influence_cost": cost,
+			})
+			continue
+		if world.influence < cost:
+			_record_event(world, "intervention_failed", year, settlement.region_id, [settlement_id], {
+				"intervention": "food_relief", "reason": "insufficient_influence", "influence_cost": cost,
+			})
+			continue
+		var capacity := float(settlement.population) * FOOD_NEED_PER_PERSON * FOOD_STORE_CAP_YEARS
+		var amount := minf(float(settlement.population) * FOOD_NEED_PER_PERSON * FOOD_RELIEF_NEED_FRACTION, maxf(0.0, capacity - settlement.food_store))
+		if amount <= 0.0:
+			_record_event(world, "intervention_failed", year, settlement.region_id, [settlement_id], {
+				"intervention": "food_relief", "reason": "store_full", "influence_cost": cost,
+			})
+			continue
+		world.influence -= cost
+		settlement.food_store += amount
+		_record_event(world, "intervention_applied", year, settlement.region_id, [settlement_id], {
+			"intervention": "food_relief", "influence_cost": cost, "food_added": amount,
+			"target_population": settlement.population,
+		})
 
 func advance_years(world: WorldState, count: int) -> Array[HistoryEvent]:
 	var advanced_events: Array[HistoryEvent] = []

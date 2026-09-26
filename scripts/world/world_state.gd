@@ -12,6 +12,10 @@ var cultures: Dictionary = {}
 var states: Dictionary = {}
 var events: Array[HistoryEvent] = []
 var snapshots: Array[Dictionary] = []
+var command_log: Array[Dictionary] = []
+var command_cursor: int = 0
+var next_command_sequence: int = 1
+var influence: float = 3.0
 var next_entity_id: int = 1
 var next_event_id: int = 1
 

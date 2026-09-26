@@ -5,6 +5,7 @@ static func make_checkpoint(world: WorldState) -> Dictionary:
 	return {
 		"year": world.year,
 		"event_cursor": world.events.size(),
+		"command_cursor": world.command_cursor,
 		"state": to_state_dictionary(world),
 	}
 
@@ -16,6 +17,7 @@ static func to_save_dictionary(world: WorldState) -> Dictionary:
 		"format_version": 1,
 		"state": to_state_dictionary(world),
 		"event_log": event_log,
+		"command_log": world.command_log.duplicate(true),
 		"snapshots": world.snapshots.duplicate(true),
 	}
 
@@ -97,6 +99,9 @@ static func to_state_dictionary(world: WorldState) -> Dictionary:
 		"year": world.year,
 		"next_entity_id": world.next_entity_id,
 		"next_event_id": world.next_event_id,
+		"command_cursor": world.command_cursor,
+		"next_command_sequence": world.next_command_sequence,
+		"influence": world.influence,
 		"map": _map_to_dictionary(world.map),
 		"regions": regions,
 		"settlements": settlements,
@@ -113,6 +118,21 @@ static func from_save_dictionary(data: Dictionary) -> Dictionary:
 	if result.has("error"):
 		return result
 	var world: WorldState = result["world"]
+	if data.has("command_log"):
+		if typeof(data["command_log"]) != TYPE_ARRAY:
+			return {"error": "Save command log is invalid."}
+		var expected_sequence := 1
+		for command_value in data["command_log"]:
+			if typeof(command_value) != TYPE_DICTIONARY or not command_value.has("sequence_number") or not command_value.has("execute_year") or not command_value.has("type") or not command_value.has("target_settlement_id") or not command_value.has("influence_cost"):
+				return {"error": "Save command log contains an invalid entry."}
+			var command: Dictionary = command_value
+			if int(command["sequence_number"]) != expected_sequence or int(command["execute_year"]) < 1 or float(command["influence_cost"]) < 0.0 or str(command["type"]) != "food_relief":
+				return {"error": "Save command log counters are invalid."}
+			world.command_log.append(command.duplicate(true))
+			expected_sequence += 1
+		world.next_command_sequence = maxi(world.next_command_sequence, expected_sequence)
+		if world.command_cursor < 0 or world.command_cursor > world.command_log.size():
+			return {"error": "Save command cursor is invalid."}
 	for event_data in data["event_log"]:
 		if typeof(event_data) != TYPE_DICTIONARY or not event_data.has("id") or not event_data.has("year") or not event_data.has("type"):
 			return {"error": "Save event log contains an invalid entry."}
@@ -143,6 +163,9 @@ static func from_state_dictionary(data: Dictionary) -> Dictionary:
 	world.year = int(data["year"])
 	world.next_entity_id = int(data.get("next_entity_id", 1))
 	world.next_event_id = int(data.get("next_event_id", 1))
+	world.command_cursor = int(data.get("command_cursor", 0))
+	world.next_command_sequence = int(data.get("next_command_sequence", 1))
+	world.influence = float(data.get("influence", 3.0))
 	world.map = _map_from_dictionary(data["map"])
 	if world.map == null:
 		return {"error": "World checkpoint map data is incomplete."}
@@ -203,7 +226,7 @@ static func from_state_dictionary(data: Dictionary) -> Dictionary:
 			state.relationships[int(relationship["other_state_id"])] = relationship["record"].duplicate(true)
 		state.at_war_with = _int_array(state_data.get("at_war_with", []))
 		world.states[state.id] = state
-	if world.year < 0 or world.next_entity_id <= 0 or world.next_event_id <= 0:
+	if world.year < 0 or world.next_entity_id <= 0 or world.next_event_id <= 0 or world.command_cursor < 0 or world.next_command_sequence <= 0 or world.influence < 0.0:
 		return {"error": "World checkpoint contains invalid counters."}
 	return {"world": world}
 

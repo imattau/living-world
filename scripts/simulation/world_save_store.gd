@@ -54,5 +54,6 @@ func _ensure_checkpoints(world: WorldState) -> void:
 	var initial_world := WorldGenerator.new().generate(world.seed)
 	initial_world.generator_version = world.generator_version
 	initial_world.simulation_version = world.simulation_version
+	initial_world.command_log = world.command_log.duplicate(true)
 	SimulationEngine.new().advance_years(initial_world, world.year)
 	world.snapshots = initial_world.snapshots.duplicate(true)

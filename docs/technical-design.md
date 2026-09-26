@@ -54,7 +54,7 @@ Start with in-memory state and a versioned save format once the model stabilizes
 4. Cultures and simple states/borders.
 5. Political events and conflict.
 6. Timeline, chronicle, and cause inspection.
-7. Evaluate generated histories across many seeds; only then add player intervention and story detection.
+7. Evaluate generated histories across many seeds, then add a constrained, replayable player intervention before story detection.
 
 ## Success check
 

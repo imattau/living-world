@@ -1,6 +1,6 @@
 # Living World
 
-A simulation-first worldbuilding game about geography, societies, and emergent history. The player observes a world, investigates why events happened, and later may influence history in limited ways.
+A simulation-first worldbuilding game about geography, societies, and emergent history. The player observes a world, investigates why events happened, and can spend regenerating Influence to send food aid to a settlement. Aid is scheduled for the next year and its uncertain downstream effects are simulated rather than directly controlled.
 
 ## First milestone
 

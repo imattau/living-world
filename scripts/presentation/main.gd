@@ -13,6 +13,7 @@ var _history_timer: Timer
 var _storage_status_label: Label
 var _summary_label: Label
 var _selection_label: Label
+var _food_aid_button: Button
 var _chronicle_list: ItemList
 var _event_detail_label: Label
 var _world: WorldState
@@ -157,6 +158,11 @@ func _build_interface() -> void:
 	_selection_label.text = "Click a settlement marker to inspect it."
 	sidebar.add_child(_selection_label)
 
+	_food_aid_button = Button.new()
+	_food_aid_button.text = "Send food aid (1 Influence)"
+	_food_aid_button.pressed.connect(_on_send_food_aid_pressed)
+	sidebar.add_child(_food_aid_button)
+
 	var chronicle_title := Label.new()
 	chronicle_title.text = "Recent history"
 	chronicle_title.add_theme_font_size_override("font_size", 18)
@@ -248,6 +254,11 @@ func _refresh_world_view() -> void:
 	for settlement_value in viewed.settlements.values():
 		var settlement: SettlementData = settlement_value
 		population_total += settlement.population
+	var influence_summary := "Influence: %.1f / 5.0" % viewed.influence
+	if viewed == _world:
+		influence_summary += " (%.1f available)" % _simulation_engine.available_influence(_world)
+	else:
+		influence_summary += " (historical)"
 	_summary_label.text = (
 		"Seed: %s\n" % viewed.seed
 		+ "Map: %d × %d\n" % [viewed.map.width, viewed.map.height]
@@ -258,8 +269,10 @@ func _refresh_world_view() -> void:
 		+ "Cultures: %d\n" % viewed.cultures.size()
 		+ "States: %d\n" % viewed.states.size()
 		+ "Population: %s\n" % _format_number(population_total)
+		+ influence_summary + "\n"
 		+ "Recorded events: %d" % viewed.events.size()
 	)
+	_update_food_aid_button()
 	_refresh_chronicle()
 	if _selected_settlement_id >= 0 and viewed.settlements.has(_selected_settlement_id):
 		_on_settlement_selected(_selected_settlement_id)
@@ -356,6 +369,24 @@ func _format_number(value: int) -> String:
 		result += digits[digit_index]
 	return result
 
+func _on_send_food_aid_pressed() -> void:
+	if _world == null or _display_world != _world or _selected_settlement_id < 0:
+		return
+	var result := _simulation_engine.queue_food_relief(_world, _selected_settlement_id)
+	_storage_status_label.text = str(result.get("message", "Could not schedule food aid."))
+	_update_food_aid_button()
+
+func _update_food_aid_button() -> void:
+	if _food_aid_button == null:
+		return
+	var can_spend := _world != null and _display_world == _world and _selected_settlement_id >= 0
+	if can_spend and _world.settlements.has(_selected_settlement_id):
+		var target: SettlementData = _world.settlements[_selected_settlement_id]
+		can_spend = target.status != SettlementData.STATUS_ABANDONED and target.population > 0
+	else:
+		can_spend = false
+	_food_aid_button.disabled = not can_spend or _simulation_engine.available_influence(_world) < 1.0
+
 func _on_settlement_selected(settlement_id: int) -> void:
 	var viewed := _display_world
 	if viewed == null or not viewed.settlements.has(settlement_id):
@@ -380,3 +411,4 @@ func _on_settlement_selected(settlement_id: int) -> void:
 		+ "Freshwater: %s\n" % ("yes" if settlement.freshwater_adjacent else "no")
 		+ "Cell: %d, %d" % [position.x, position.y]
 	)
+	_update_food_aid_button()
