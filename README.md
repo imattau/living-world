@@ -8,11 +8,11 @@ Generate a seeded world, simulate 200–250 years, and make its history interest
 
 ## Project status
 
-The project includes seeded world generation, an interactive map, annual food and population simulation, food-pressure migration, same-state food exchange, and a recent-history chronicle. Enter a seed, generate a world, then advance it one or ten years at a time. See [the design brief](docs/design-brief.md), [technical design overview](docs/technical-design.md), and [implementation-ready technical design brief](docs/technical-design-brief.md).
+The project includes seeded world generation, an interactive map, annual food and population simulation, food-pressure migration, same-state food exchange, state stability and disputes, coarse deterministic wars and battles, and a recent-history chronicle. Enter a seed, generate a world, then advance it one or ten years at a time. See [the design brief](docs/design-brief.md), [technical design overview](docs/technical-design.md), and [implementation-ready technical design brief](docs/technical-design-brief.md).
 
 ## Getting started
 
-Open this folder in Godot 4.7.x stable and run the project (Linux desktop is the first target). The current scene supports seeded generation and annual stepping; migration, trade, and historical browsing are next.
+Open this folder in Godot 4.7.x stable and run the project (Linux desktop is the first target). The current scene supports seeded generation, annual stepping, and a chronicle of population, trade, and political events. Historical browsing and persistence remain upcoming.
 
 ## Project layout
 

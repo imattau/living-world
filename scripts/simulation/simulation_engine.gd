@@ -2,6 +2,7 @@ class_name SimulationEngine
 extends RefCounted
 
 const ENVIRONMENT_STREAM_ID := 5
+const CONFLICT_STREAM_ID := 7
 const FOOD_YIELD_PER_PERSON := 1.2
 const FOOD_NEED_PER_PERSON := 1.0
 const FOOD_STORE_CAP_YEARS := 2.0
@@ -25,6 +26,7 @@ func advance_year(world: WorldState) -> Array[HistoryEvent]:
 	_apply_migration(world, entity_ids, reports, target_year)
 	_update_settlement_status(world, entity_ids, target_year)
 	_apply_food_trade(world, entity_ids, target_year)
+	_update_politics_and_conflict(world, target_year)
 	world.year = target_year
 	for event in _pending_events:
 		world.events.append(event)
@@ -364,6 +366,194 @@ func _apply_food_trade(world: WorldState, entity_ids: Array[int], year: int) -> 
 			{"food_amount": float(trade_by_donor[donor_id]), "recipient_ids": recipient_ids.duplicate()},
 			participants
 		)
+
+func _update_politics_and_conflict(world: WorldState, year: int) -> void:
+	var state_ids := _sorted_integer_keys(world.states)
+	if state_ids.size() < 2:
+		return
+	var food_pressure_by_state := {}
+	for state_id in state_ids:
+		food_pressure_by_state[state_id] = _state_food_pressure(world, int(state_id))
+		var state: StateData = world.states[state_id]
+		var pressure: float = food_pressure_by_state[state_id]
+		state.stability = clampf(state.stability + (0.35 - pressure) * 0.01, 0.0, 1.0)
+
+	var border_pairs: Array[Dictionary] = []
+	for first_index in state_ids.size():
+		var first_id: int = state_ids[first_index]
+		for second_index in range(first_index + 1, state_ids.size()):
+			var second_id: int = state_ids[second_index]
+			var border_region_id := _shared_border_region(world, first_id, second_id)
+			if border_region_id < 0:
+				continue
+			var first: StateData = world.states[first_id]
+			var second: StateData = world.states[second_id]
+			var contested := _has_contested_claim(world, first_id, second_id)
+			var resource_pressure := clampf(
+				(maxf(float(food_pressure_by_state[first_id]), float(food_pressure_by_state[second_id])) - 0.35) / 0.65,
+				0.0,
+				1.0
+			)
+			var dispute_score := 0.25 + (0.35 if contested else 0.0) + 0.40 * resource_pressure
+			var is_at_war := first.at_war_with.has(second_id) or second.at_war_with.has(first_id)
+			var relation := {
+				"dispute_score": dispute_score,
+				"contested_claim": contested,
+				"resource_pressure": resource_pressure,
+				"last_updated_year": year,
+			}
+			first.relationships[second_id] = relation.duplicate(true)
+			second.relationships[first_id] = relation.duplicate(true)
+			if not is_at_war and dispute_score >= 0.70 and first.stability >= 0.25 and second.stability >= 0.25:
+				first.at_war_with.append(second_id)
+				second.at_war_with.append(first_id)
+				first.at_war_with.sort()
+				second.at_war_with.sort()
+				_record_event(
+					world,
+					"war_declared",
+					year,
+					border_region_id,
+					[first_id, second_id],
+					{
+						"dispute_score": dispute_score,
+						"contested_claim": contested,
+						"resource_pressure": resource_pressure,
+						"stability": [first.stability, second.stability],
+					},
+					[first_id, second_id]
+				)
+				is_at_war = true
+			if is_at_war:
+				border_pairs.append({"first": first_id, "second": second_id, "region": border_region_id})
+
+	var rng := SeededRandom.new(
+		SeededRandom.derive_seed(world.seed, CONFLICT_STREAM_ID, world.simulation_version * 65_537 + year)
+	)
+	for pair in border_pairs:
+		var first_id: int = pair["first"]
+		var second_id: int = pair["second"]
+		var first: StateData = world.states[first_id]
+		var second: StateData = world.states[second_id]
+		var first_power := _state_military_strength(world, first_id)
+		var second_power := _state_military_strength(world, second_id)
+		var first_variance := 0.85 + rng.next_float() * 0.30
+		var second_variance := 0.85 + rng.next_float() * 0.30
+		var first_score := first_power * first_variance
+		var second_score := second_power * second_variance
+		var winner_id := first_id if first_score >= second_score else second_id
+		var loser_id := second_id if winner_id == first_id else first_id
+		var winner: StateData = world.states[winner_id]
+		var loser: StateData = world.states[loser_id]
+		var loser_population_before := _state_population(world, loser_id)
+		var casualties := mini(loser_population_before, maxi(1, roundi(float(loser_population_before) * 0.002)))
+		_apply_state_casualties(world, loser_id, casualties)
+		winner.stability = clampf(winner.stability + 0.015, 0.0, 1.0)
+		loser.stability = clampf(loser.stability - 0.04, 0.0, 1.0)
+		_record_event(
+			world,
+			"battle_resolved",
+			year,
+			int(pair["region"]),
+			[winner_id, loser_id],
+			{
+				"winner_state_id": winner_id,
+				"loser_state_id": loser_id,
+				"winner_strength": first_score if winner_id == first_id else second_score,
+				"loser_strength": second_score if loser_id == second_id else first_score,
+				"casualties": casualties,
+				"variance_factors": [first_variance, second_variance],
+			},
+			[winner_id, loser_id]
+		)
+		if loser.stability < 0.10:
+			first.at_war_with.erase(second_id)
+			second.at_war_with.erase(first_id)
+			_record_event(
+				world,
+				"peace_agreed",
+				year,
+				int(pair["region"]),
+				[winner_id, loser_id],
+				{"reason": "state_instability", "losing_state_stability": loser.stability},
+				[winner_id, loser_id]
+			)
+
+func _state_food_pressure(world: WorldState, state_id: int) -> float:
+	var weighted_pressure := 0.0
+	var population_total := 0.0
+	for settlement_id in _sorted_settlement_ids(world):
+		var settlement: SettlementData = world.settlements[settlement_id]
+		if settlement.state_id != state_id or settlement.status == SettlementData.STATUS_ABANDONED:
+			continue
+		var weight := float(settlement.population)
+		population_total += weight
+		weighted_pressure += weight * clampf((0.75 - settlement.food_coverage) / 0.75, 0.0, 1.0)
+	return weighted_pressure / population_total if population_total > 0.0 else 0.0
+
+func _state_population(world: WorldState, state_id: int) -> int:
+	var total := 0
+	for settlement_id in _sorted_settlement_ids(world):
+		var settlement: SettlementData = world.settlements[settlement_id]
+		if settlement.state_id == state_id and settlement.status != SettlementData.STATUS_ABANDONED:
+			total += settlement.population
+	return total
+
+func _state_military_strength(world: WorldState, state_id: int) -> float:
+	var strength := 0.0
+	for settlement_id in _sorted_settlement_ids(world):
+		var settlement: SettlementData = world.settlements[settlement_id]
+		if settlement.state_id != state_id or settlement.status == SettlementData.STATUS_ABANDONED:
+			continue
+		strength += float(settlement.population) * (0.5 + 0.5 * clampf(settlement.food_coverage, 0.0, 1.5))
+	return strength
+
+func _apply_state_casualties(world: WorldState, state_id: int, casualties: int) -> void:
+	var population := _state_population(world, state_id)
+	if population <= 0 or casualties <= 0:
+		return
+	var candidates: Array[Dictionary] = []
+	for settlement_id in _sorted_settlement_ids(world):
+		var settlement: SettlementData = world.settlements[settlement_id]
+		if settlement.state_id != state_id or settlement.status == SettlementData.STATUS_ABANDONED:
+			continue
+		candidates.append({
+			"id": settlement_id,
+			"weight": float(settlement.population),
+			"capacity": settlement.population,
+		})
+	var losses := _split_integer_amount(mini(casualties, population), candidates)
+	for settlement_id in _sorted_integer_keys(losses):
+		var settlement: SettlementData = world.settlements[settlement_id]
+		settlement.population = maxi(0, settlement.population - int(losses[settlement_id]))
+
+func _shared_border_region(world: WorldState, first_state_id: int, second_state_id: int) -> int:
+	for region_id in _sorted_integer_keys(world.regions):
+		var region: RegionData = world.regions[region_id]
+		if region.controlling_state_id != first_state_id:
+			continue
+		for neighbor_id in region.neighbor_ids:
+			if not world.regions.has(neighbor_id):
+				continue
+			var neighbor: RegionData = world.regions[neighbor_id]
+			if neighbor.controlling_state_id == second_state_id:
+				return region_id
+	return -1
+
+func _has_contested_claim(world: WorldState, first_state_id: int, second_state_id: int) -> bool:
+	for region_id in _sorted_integer_keys(world.regions):
+		var region: RegionData = world.regions[region_id]
+		if region.controlling_state_id != first_state_id and region.controlling_state_id != second_state_id:
+			continue
+		for settlement_id in region.settlement_ids:
+			if not world.settlements.has(settlement_id):
+				continue
+			var settlement: SettlementData = world.settlements[settlement_id]
+			if (region.controlling_state_id == first_state_id and settlement.state_id == second_state_id) or (
+				region.controlling_state_id == second_state_id and settlement.state_id == first_state_id
+			):
+				return true
+	return false
 
 func _split_integer_amount(total: int, candidates: Array[Dictionary]) -> Dictionary:
 	var allocations := {}

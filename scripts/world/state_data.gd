@@ -10,3 +10,4 @@ var leader_label: String = "Founder"
 var treasury: float = 0.0
 var stability: float = 0.75
 var relationships: Dictionary = {}
+var at_war_with: Array[int] = []

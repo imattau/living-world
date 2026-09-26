@@ -1,6 +1,6 @@
 # Living World — Technical Design Brief
 
-**Status:** Initial implementation brief  
+**Status:** Active prototype implementation
 **Audience:** Engineering and design  
 **Engine:** Godot 4.7.x stable / GDScript
 **Target:** Desktop prototype; single player; offline simulation
@@ -122,7 +122,7 @@ Only identity and a small number of rule-relevant numeric attributes are needed 
 - ID, name key, government type
 - leader label or optional notable-person ID
 - settlement/region membership derived from control data
-- treasury proxy, stability, and bilateral relationship records
+- treasury proxy, stability, bilateral relationship/dispute records, and sorted IDs of states currently at war
 
 Initial government types: tribe, chiefdom, city-state, kingdom, and republic. Borders are derived from controlled regions.
 
@@ -151,8 +151,8 @@ Same seed, generator version, simulation version, and command sequence must prod
 3. **Population:** apply births/deaths as bounded rates; evaluate food pressure; propose migration from pressured settlements toward viable neighbors.
 4. **Settlement:** apply migration; update settlement population, stores, status, and abandonment/founding outcomes.
 5. **Economy and exchange:** resolve only coarse local surpluses, shortages, and neighboring trade. Avoid per-item markets.
-6. **Politics:** update state stability, relationships, leadership transitions, and control claims.
-7. **Conflict:** evaluate disputes and possible war/battle outcomes with coarse deterministic resolution. This is not tactical combat.
+6. **Politics:** update state stability from food pressure, store bilateral border disputes, and declare wars when the documented dispute and stability thresholds are met.
+7. **Conflict:** resolve one coarse engagement per active neighboring state pair per year from strength plus seeded variance; apply casualties and stability changes, and agree peace when the losing state falls below the stability threshold. This is not tactical combat.
 8. **Event commit:** assign IDs, attach cause links, append events, update indexes/checkpoints, and close the year.
 
 If a phase emits a change that another phase needs immediately, define that explicitly in the phase contract. Otherwise apply it at the phase boundary. The order is part of the simulation version.
@@ -281,7 +281,8 @@ These choices are fixed for the first implementation. Tune numerical balance aft
 - **Food production:** annual yield is `population × fertility × 1.2 × weather_factor`, where weather factor is `clamp(0.75 + 0.50 × local_baseline_rainfall + deterministic_variation, 0.75, 1.25)` and deterministic variation is in `[-0.05, 0.05]`. Subtract the current year's population need after harvest; stores cap at two years of updated need. Record harvest failure and famine only when crossing their food-coverage thresholds, plus recovery when coverage rises back above the stress threshold.
 - **Migration:** only settlements below 0.6 food coverage propose migration. Move up to 5% of population per year to an adjacent or same-region destination if its projected food coverage exceeds the origin by at least 0.25 and it has capacity. Split among eligible destinations by coverage gap; resolve capacity conflicts and apply moves simultaneously.
 - **Trade:** settlements controlled by the same state in the same or neighboring region may transfer surplus food above one year of reserve to a neighbor below 0.75 coverage, up to 10% of surplus per donor per year. Resolve storage capacity simultaneously. No money or market-clearing model in this milestone.
-- **Conflict:** dispute score starts from border adjacency (0.25), a contested-region claim (0.35), and resource pressure (up to 0.40). War can be declared at score ≥0.70 when both states have stability ≥0.25. Resolve one coarse engagement per neighboring pair per year from normalized population/food strength plus seeded variance of ±15%; record inputs and outcome as event facts.
+- **Politics:** state food pressure is the population-weighted share of unmet coverage below 0.75. Stability drifts by `(0.35 − pressure) × 0.01` per year, clamped to 0–1. Border pairs record dispute score, claim status, and resource pressure in symmetric relationship records. A contested claim exists when a settlement belonging to one state sits in a region controlled by the other. The score is 0.25 for border adjacency, plus 0.35 for a contested claim, plus up to 0.40 for pressure. Declare war at 0.70 when both states have stability at least 0.25.
+- **Conflict:** dispute score starts from border adjacency (0.25), a contested-region claim (0.35), and resource pressure (up to 0.40). War can be declared at score ≥0.70 when both states have stability ≥0.25. Resolve one coarse engagement per neighboring pair per year from population weighted by food coverage, with seeded opposing strength factors in the 0.85–1.15 range. The lower-scoring state loses 0.2% of its population, distributed proportionally; the winner gains 0.015 stability and loser loses 0.04. Record score inputs, strengths, variance, and casualties in event facts. Agree peace if the losing state falls below 0.10 stability. This model does not transfer territory.
 - **Historical state:** full JSON snapshot at year 0 and every 25 years; separate inspect-state replay, at most 24 ticks from checkpoint.
 - **Save format:** one versioned JSON file under `user://saves/`, sorted entity arrays, map arrays, event history, snapshots, and future command log. No SQLite for the prototype.
 - **Presentation target:** desktop at 1280×720, mouse and keyboard; renderer stays on the current compatibility setting until visuals require another choice.

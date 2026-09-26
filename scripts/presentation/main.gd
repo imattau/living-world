@@ -182,7 +182,15 @@ func _refresh_chronicle() -> void:
 		var event: HistoryEvent = _world.events[event_index]
 		var title := event.type.replace("_", " ").capitalize()
 		var line := "Year %d · %s" % [event.year, title]
-		if not event.subject_ids.is_empty() and _world.settlements.has(event.subject_ids[0]):
+		if event.type in ["war_declared", "battle_resolved", "peace_agreed"]:
+			var state_names: Array[String] = []
+			for state_id in event.participant_ids:
+				if _world.states.has(state_id):
+					var participant_state: StateData = _world.states[state_id]
+					state_names.append(participant_state.name)
+			if not state_names.is_empty():
+				line += " — " + PackedStringArray(state_names).join(" vs ")
+		elif not event.subject_ids.is_empty() and _world.settlements.has(event.subject_ids[0]):
 			var settlement: SettlementData = _world.settlements[event.subject_ids[0]]
 			line += " — " + settlement.name
 		if event.facts.has("food_coverage"):
@@ -191,6 +199,17 @@ func _refresh_chronicle() -> void:
 			line += " (%s people)" % _format_number(int(event.facts["population_moved"]))
 		if event.facts.has("food_amount"):
 			line += " (%.0f food)" % float(event.facts["food_amount"])
+		if event.type == "war_declared" and event.facts.has("dispute_score"):
+			line += " (dispute %.2f)" % float(event.facts["dispute_score"])
+		elif event.type == "battle_resolved" and event.facts.has("winner_state_id"):
+			var winner_id := int(event.facts["winner_state_id"])
+			var winner_name := "State %d" % winner_id
+			if _world.states.has(winner_id):
+				var winner_state: StateData = _world.states[winner_id]
+				winner_name = winner_state.name
+			line += " — %s won; %s casualties" % [winner_name, _format_number(int(event.facts["casualties"]))]
+		elif event.type == "peace_agreed":
+			line += " (peace)"
 		lines.append(line)
 	_chronicle_label.text = "No events yet." if lines.is_empty() else "\n".join(lines)
 
