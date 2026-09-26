@@ -391,11 +391,10 @@ func _update_politics_and_conflict(world: WorldState, year: int) -> void:
 			var first: StateData = world.states[first_id]
 			var second: StateData = world.states[second_id]
 			var contested := _has_contested_claim(world, first_id, second_id)
-			var resource_pressure := clampf(
-				(maxf(float(food_pressure_by_state[first_id]), float(food_pressure_by_state[second_id])) - 0.35) / 0.65,
-				0.0,
-				1.0
-			)
+			var resource_pressure := clampf(3.0 * maxf(
+				float(food_pressure_by_state[first_id]),
+				float(food_pressure_by_state[second_id])
+			), 0.0, 1.0)
 			var dispute_score := 0.25 + (0.35 if contested else 0.0) + 0.40 * resource_pressure
 			var is_at_war := first.at_war_with.has(second_id) or second.at_war_with.has(first_id)
 			var relation := {

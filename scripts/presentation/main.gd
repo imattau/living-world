@@ -282,7 +282,7 @@ func _refresh_chronicle() -> void:
 					var participant_state: StateData = viewed.states[state_id]
 					state_names.append(participant_state.name)
 			if not state_names.is_empty():
-				line += " — " + PackedStringArray(state_names).join(" vs ")
+				line += " — " + " vs ".join(PackedStringArray(state_names))
 		elif not event.subject_ids.is_empty() and viewed.settlements.has(event.subject_ids[0]):
 			var settlement: SettlementData = viewed.settlements[event.subject_ids[0]]
 			line += " — " + settlement.name

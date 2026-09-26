@@ -310,8 +310,10 @@ func _create_regions(world: WorldState, components: Dictionary) -> void:
 				var neighbor_ids: Array[int] = region.neighbor_ids
 				if not neighbor_ids.has(neighbor_region_id):
 					neighbor_ids.append(neighbor_region_id)
-	region.cell_indices.sort()
-	region.neighbor_ids.sort()
+	for region_value in world.regions.values():
+		var region: RegionData = region_value
+		region.cell_indices.sort()
+		region.neighbor_ids.sort()
 
 func _create_cultures(world: WorldState) -> void:
 	for culture_index in 3:

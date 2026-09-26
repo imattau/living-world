@@ -3,7 +3,7 @@ extends RefCounted
 
 var seed: int
 var generator_version: int = 1
-var simulation_version: int = 2
+var simulation_version: int = 3
 var year: int = 0
 var map: WorldMap
 var regions: Dictionary = {}

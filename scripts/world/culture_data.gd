@@ -7,4 +7,4 @@ var origin_region_id: int = -1
 var parent_ids: Array[int] = []
 var language_label: String
 var religion_label: String
-var values: PackedFloat32Array()
+var values := PackedFloat32Array()

@@ -8,7 +8,7 @@ Generate a seeded world, simulate 200–250 years, and make its history interest
 
 ## Project status
 
-The project includes seeded world generation, an interactive map, annual food and population simulation, food-pressure migration, same-state food exchange, state stability and disputes, coarse deterministic wars and battles, historical year inspection, and versioned JSON save/load with periodic checkpoints. Enter a seed, generate a world, advance it, then inspect earlier years or save and reload the world. See [the design brief](docs/design-brief.md), [technical design overview](docs/technical-design.md), and [implementation-ready technical design brief](docs/technical-design-brief.md).
+The project includes seeded world generation, an interactive map, annual food and population simulation, food-pressure migration, same-state food exchange, state stability and disputes, coarse deterministic wars and battles, historical year inspection, and versioned JSON save/load with periodic checkpoints. A reproducible 20-seed, 250-year baseline is available in [the evaluation report](docs/evaluation/year-250-baseline.md). Enter a seed, generate a world, advance it, then inspect earlier years or save and reload the world. See [the design brief](docs/design-brief.md), [technical design overview](docs/technical-design.md), and [implementation-ready technical design brief](docs/technical-design-brief.md).
 
 ## Getting started
 
