@@ -111,25 +111,29 @@ func _apply_scheduled_commands(world: WorldState, year: int) -> void:
 		var settlement: SettlementData = world.settlements[settlement_id]
 		if settlement.status == SettlementData.STATUS_ABANDONED or settlement.population <= 0:
 			_record_event(world, "intervention_failed", year, settlement.region_id, [settlement_id], {
-				"intervention": "food_relief", "reason": "target_unavailable", "influence_cost": cost,
+				"intervention": "food_relief", "target_settlement_id": settlement_id,
+				"reason": "target_unavailable", "influence_cost": cost,
 			})
 			continue
 		if world.influence < cost:
 			_record_event(world, "intervention_failed", year, settlement.region_id, [settlement_id], {
-				"intervention": "food_relief", "reason": "insufficient_influence", "influence_cost": cost,
+				"intervention": "food_relief", "target_settlement_id": settlement_id,
+				"reason": "insufficient_influence", "influence_cost": cost,
 			})
 			continue
 		var capacity := float(settlement.population) * FOOD_NEED_PER_PERSON * FOOD_STORE_CAP_YEARS
 		var amount := minf(float(settlement.population) * FOOD_NEED_PER_PERSON * FOOD_RELIEF_NEED_FRACTION, maxf(0.0, capacity - settlement.food_store))
 		if amount <= 0.0:
 			_record_event(world, "intervention_failed", year, settlement.region_id, [settlement_id], {
-				"intervention": "food_relief", "reason": "store_full", "influence_cost": cost,
+				"intervention": "food_relief", "target_settlement_id": settlement_id,
+				"reason": "store_full", "influence_cost": cost,
 			})
 			continue
 		world.influence -= cost
 		settlement.food_store += amount
 		_record_event(world, "intervention_applied", year, settlement.region_id, [settlement_id], {
 			"intervention": "food_relief", "target_settlement_id": settlement_id,
+			"command_sequence": int(command.get("sequence_number", 0)),
 			"influence_cost": cost, "food_added": amount,
 			"target_population": settlement.population,
 		})
@@ -344,9 +348,16 @@ func _apply_migration(
 		destination_ids.sort()
 		var participants: Array[int] = [origin_id]
 		var destination_facts: Array[int] = []
+		var destination_evidence: Array[Dictionary] = []
 		for destination_id in destination_ids:
 			participants.append(int(destination_id))
 			destination_facts.append(int(destination_id))
+			var destination_coverage: float = float(reports[int(destination_id)]["food_coverage"])
+			destination_evidence.append({
+				"settlement_id": int(destination_id),
+				"food_coverage": destination_coverage,
+				"coverage_gap": destination_coverage - float(reports[origin_id]["food_coverage"]),
+			})
 		var cause_links: Array[Dictionary] = []
 		var food_cause := _find_active_food_cause(world, origin_id)
 		if food_cause != null:
@@ -364,7 +375,10 @@ func _apply_migration(
 			{
 				"population_moved": int(moved_by_origin[origin_id]),
 				"origin_food_coverage": float(reports[origin_id]["food_coverage"]),
+				"origin_food_coverage_threshold": 0.6,
+				"destination_coverage_gap_threshold": 0.25,
 				"destination_settlement_ids": destination_facts,
+				"destination_food_coverages": destination_evidence,
 				"cause": "food_pressure",
 			},
 			participants,
@@ -458,6 +472,8 @@ func _apply_food_trade(world: WorldState, entity_ids: Array[int], year: int) -> 
 					"donor": donor_id,
 					"recipient": int(recipient_info["id"]),
 					"amount": amount,
+					"donor_surplus": surplus,
+					"recipient_food_coverage": float(world.settlements[int(recipient_info["id"])].food_coverage),
 				})
 
 	# Scale simultaneous arrivals if several donors target the same stores.
@@ -485,6 +501,8 @@ func _apply_food_trade(world: WorldState, entity_ids: Array[int], year: int) -> 
 	var store_delta := {}
 	var trade_by_donor := {}
 	var recipients_by_donor := {}
+	var donor_surplus_by_donor := {}
+	var recipient_coverages_by_donor := {}
 	for proposal in proposals:
 		var amount: float = proposal["amount"]
 		if amount <= 0.0:
@@ -494,9 +512,15 @@ func _apply_food_trade(world: WorldState, entity_ids: Array[int], year: int) -> 
 		store_delta[donor_id] = float(store_delta.get(donor_id, 0.0)) - amount
 		store_delta[recipient_id] = float(store_delta.get(recipient_id, 0.0)) + amount
 		trade_by_donor[donor_id] = float(trade_by_donor.get(donor_id, 0.0)) + amount
+		donor_surplus_by_donor[donor_id] = float(proposal["donor_surplus"])
 		if not recipients_by_donor.has(donor_id):
 			recipients_by_donor[donor_id] = []
+			recipient_coverages_by_donor[donor_id] = []
 		recipients_by_donor[donor_id].append(recipient_id)
+		recipient_coverages_by_donor[donor_id].append({
+			"settlement_id": recipient_id,
+			"food_coverage": float(proposal["recipient_food_coverage"]),
+		})
 	for settlement_id in _sorted_integer_keys(store_delta):
 		var settlement: SettlementData = world.settlements[settlement_id]
 		var food_change: float = store_delta[settlement_id]
@@ -519,7 +543,13 @@ func _apply_food_trade(world: WorldState, entity_ids: Array[int], year: int) -> 
 			year,
 			donor.region_id,
 			[int(donor_id)],
-			{"food_amount": float(trade_by_donor[donor_id]), "recipient_ids": recipient_ids.duplicate()},
+			{
+				"food_amount": float(trade_by_donor[donor_id]),
+				"donor_surplus_before_exchange": float(donor_surplus_by_donor[donor_id]),
+				"recipient_ids": recipient_ids.duplicate(),
+				"recipient_food_coverages_before_exchange": recipient_coverages_by_donor[donor_id].duplicate(true),
+				"recipient_food_coverage_threshold": 0.75,
+			},
 			participants
 		)
 
@@ -664,7 +694,12 @@ func _update_politics_and_conflict(world: WorldState, year: int) -> void:
 				year,
 				int(pair["region"]),
 				[winner_id, loser_id],
-				{"reason": "state_instability", "losing_state_stability": loser.stability},
+				{
+					"reason": "state_instability",
+					"losing_state_stability": loser.stability,
+					"winner_state_id": winner_id,
+					"loser_state_id": loser_id,
+				},
 				[winner_id, loser_id]
 			)
 
@@ -1419,7 +1454,7 @@ func _record_event(
 	for participant_id in participant_ids:
 		event.participant_ids.append(participant_id)
 	event.facts = facts.duplicate(true)
-	event.cause_links = cause_links.duplicate(true)
+	event.cause_links = cause_links.duplicate(true) if not cause_links.is_empty() else _causes_for_event(world, event)
 	_pending_events.append(event)
 	return event.id
 
@@ -1456,6 +1491,148 @@ func _find_war_declaration_event(world: WorldState, first_state_id: int, second_
 		if event.type == "war_declared" and event.subject_ids.has(first_state_id) and event.subject_ids.has(second_state_id):
 			return event
 	return null
+
+func _causes_for_event(world: WorldState, event: HistoryEvent) -> Array[Dictionary]:
+	var causes: Array[Dictionary] = []
+	match event.type:
+		"intervention_applied":
+			causes.append(_condition_cause("player_action", "food_aid_command", {
+				"command_sequence": int(event.facts.get("command_sequence", 0)),
+				"target_settlement_id": int(event.facts.get("target_settlement_id", -1)),
+				"influence_cost": float(event.facts.get("influence_cost", 0.0)),
+			}, 1.0))
+		"intervention_failed":
+			causes.append(_condition_cause("player_action", "food_aid_command_failed", {
+				"reason": str(event.facts.get("reason", "unknown")),
+				"target_settlement_id": int(event.facts.get("target_settlement_id", -1)),
+			}, 1.0))
+		"famine_began":
+			causes.append(_condition_cause("food_shortage", "coverage_below_famine_threshold", {
+				"food_coverage": float(event.facts.get("food_coverage", 0.0)),
+				"threshold": 0.5,
+				"weather_factor": float(event.facts.get("weather_factor", 1.0)),
+			}, 1.0))
+		"harvest_failure":
+			causes.append(_condition_cause("food_shortage", "coverage_below_stress_threshold", {
+				"food_coverage": float(event.facts.get("food_coverage", 0.0)),
+				"threshold": 0.75,
+				"weather_factor": float(event.facts.get("weather_factor", 1.0)),
+			}, 1.0))
+		"harvest_recovery":
+			causes.append(_condition_cause("food_recovery", "coverage_recovered", {
+				"food_coverage": float(event.facts.get("food_coverage", 0.0)),
+				"threshold": 0.75,
+			}, 1.0))
+			_append_recent_event_cause(world, event, causes, ["famine_began", "harvest_failure", "intervention_applied"], event.subject_ids, "recovery_after", 10)
+		"population_migrated":
+			causes.append(_condition_cause("food_pressure", "origin_food_coverage", {
+				"food_coverage": float(event.facts.get("origin_food_coverage", 0.0)),
+				"threshold": float(event.facts.get("origin_food_coverage_threshold", 0.6)),
+				"destination_coverage_gap_threshold": float(event.facts.get("destination_coverage_gap_threshold", 0.25)),
+				"destination_food_coverages": event.facts.get("destination_food_coverages", []),
+				"population_moved": int(event.facts.get("population_moved", 0)),
+			}, 0.9))
+			_append_recent_event_cause(world, event, causes, ["famine_began", "harvest_failure"], event.subject_ids, "migration_after", 5)
+		"food_traded":
+			causes.append(_condition_cause("food_exchange", "surplus_met_local_shortage", {
+				"donor_settlement_id": event.subject_ids[0] if not event.subject_ids.is_empty() else -1,
+				"donor_surplus_before_exchange": float(event.facts.get("donor_surplus_before_exchange", 0.0)),
+				"recipient_settlement_ids": event.facts.get("recipient_ids", []),
+				"recipient_food_coverages_before_exchange": event.facts.get("recipient_food_coverages_before_exchange", []),
+				"recipient_food_coverage_threshold": float(event.facts.get("recipient_food_coverage_threshold", 0.75)),
+				"food_amount": float(event.facts.get("food_amount", 0.0)),
+			}, 0.8))
+			for recipient_value in event.facts.get("recipient_ids", []):
+				_append_recent_event_cause(world, event, causes, ["famine_began", "harvest_failure"], [int(recipient_value)], "aid_to_stressed_settlement", 3)
+		"war_declared":
+			causes.append(_condition_cause("territorial_dispute", "dispute_threshold_reached", {
+				"dispute_score": float(event.facts.get("dispute_score", 0.0)),
+				"threshold": 0.7,
+				"contested_claim": bool(event.facts.get("contested_claim", false)),
+				"participant_state_ids": event.participant_ids.duplicate(),
+			}, 1.0))
+			causes.append(_condition_cause("resource_competition", "food_pressure_raised_dispute", {
+				"resource_pressure": float(event.facts.get("resource_pressure", 0.0)),
+			}, 0.8))
+			causes.append(_condition_cause("state_stability", "both_states_above_war_threshold", {
+				"stability": event.facts.get("stability", []),
+				"threshold": 0.25,
+			}, 1.0))
+		"battle_resolved":
+			_append_recent_event_cause(world, event, causes, ["war_declared"], event.participant_ids, "engagement_in_war", 5)
+			causes.append(_condition_cause("military_strength", "seeded_strength_comparison", {
+				"winner_state_id": int(event.facts.get("winner_state_id", -1)),
+				"winner_strength": float(event.facts.get("winner_strength", 0.0)),
+				"loser_strength": float(event.facts.get("loser_strength", 0.0)),
+				"variance_factors": event.facts.get("variance_factors", []),
+			}, 1.0))
+		"peace_agreed":
+			_append_recent_event_cause(world, event, causes, ["battle_resolved"], event.participant_ids, "instability_after_battle", 1)
+			causes.append(_condition_cause("state_instability", "peace_threshold_reached", {
+				"loser_state_id": int(event.facts.get("loser_state_id", -1)),
+				"losing_state_stability": float(event.facts.get("losing_state_stability", 0.0)),
+				"threshold": 0.1,
+			}, 1.0))
+		"settlement_abandoned":
+			causes.append(_condition_cause("population_decline", "below_abandonment_threshold", {
+				"population": int(event.facts.get("population", 0)),
+				"years_below_threshold": int(event.facts.get("years_below_threshold", 0)),
+				"population_threshold": ABANDONMENT_POPULATION,
+				"required_years": YEARS_BELOW_ABANDONMENT_THRESHOLD,
+			}, 1.0))
+			_append_recent_event_cause(world, event, causes, ["famine_began", "harvest_failure"], event.subject_ids, "decline_after_food_stress", 10)
+		"settlement_status_changed":
+			causes.append(_condition_cause("population_change", "population_crossed_status_band", {
+				"population": int(event.facts.get("population", 0)),
+				"from_status": str(event.facts.get("from", "")),
+				"to_status": str(event.facts.get("to", "")),
+				"status_population_boundaries": [500, 2000, 8000],
+			}, 1.0))
+	return causes
+
+func _append_recent_event_cause(
+	world: WorldState,
+	event: HistoryEvent,
+	causes: Array[Dictionary],
+	event_types: Array,
+	entity_ids: Array,
+	category: String,
+	max_year_gap: int
+) -> void:
+	var source := _find_recent_event(world, event_types, entity_ids, event.year, max_year_gap)
+	if source == null:
+		return
+	causes.append({
+		"event_id": source.id,
+		"category": category,
+		"strength": 0.8,
+	})
+
+func _find_recent_event(world: WorldState, event_types: Array, entity_ids: Array, year: int, max_year_gap: int) -> HistoryEvent:
+	var latest: HistoryEvent
+	var candidates: Array[HistoryEvent] = []
+	candidates.append_array(world.events)
+	candidates.append_array(_pending_events)
+	for candidate in candidates:
+		if not event_types.has(candidate.type) or candidate.year > year or year - candidate.year > max_year_gap:
+			continue
+		var matching_entity_count := 0
+		for entity_id in entity_ids:
+			if candidate.subject_ids.has(int(entity_id)) or candidate.participant_ids.has(int(entity_id)):
+				matching_entity_count += 1
+		var pair_cause := event_types.has("war_declared") or event_types.has("battle_resolved")
+		var required_matches := mini(2, entity_ids.size()) if pair_cause else 1
+		if matching_entity_count >= required_matches and (latest == null or candidate.id > latest.id):
+			latest = candidate
+	return latest
+
+func _condition_cause(category: String, condition: String, evidence: Dictionary, strength: float) -> Dictionary:
+	return {
+		"category": category,
+		"condition": condition,
+		"evidence": evidence.duplicate(true),
+		"strength": strength,
+	}
 
 func _carrying_capacity(settlement: SettlementData) -> float:
 	var freshwater_bonus := 300.0 if settlement.freshwater_adjacent else 0.0

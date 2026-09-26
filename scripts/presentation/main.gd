@@ -483,14 +483,38 @@ func _on_history_event_selected(item_index: int) -> void:
 	if not event.cause_links.is_empty():
 		detail += "Causes:\n"
 		for cause in event.cause_links:
-			detail += "• %s (event %s, strength %s)\n" % [
-				str(cause.get("category", "condition")),
-				str(cause.get("event_id", "condition")),
-				str(cause.get("strength", "—")),
-			]
+			var category := str(cause.get("category", "condition"))
+			var strength := float(cause.get("strength", 0.0))
+			if cause.has("event_id"):
+				var source_description := "event %d" % int(cause["event_id"])
+				for source_value in _display_world.events:
+					var source_event: HistoryEvent = source_value
+					if source_event.id == int(cause["event_id"]):
+						source_description = "Year %d · %s (#%d)" % [
+							source_event.year, source_event.type.replace("_", " "), source_event.id,
+						]
+						break
+				detail += "• %s ← %s (strength %.2f)\n" % [category, source_description, strength]
+			else:
+				var evidence_text := _format_cause_evidence(cause.get("evidence", {}))
+				detail += "• %s · %s: %s (strength %.2f)\n" % [
+					category, str(cause.get("condition", "recorded condition")), evidence_text, strength,
+				]
 	else:
 		detail += "Cause evidence is recorded in the event facts above."
 	_event_detail_label.text = detail.strip_edges()
+
+func _format_cause_evidence(evidence_value: Variant) -> String:
+	if typeof(evidence_value) != TYPE_DICTIONARY or evidence_value.is_empty():
+		return "no additional evidence"
+	var keys: Array[String] = []
+	for key in evidence_value.keys():
+		keys.append(str(key))
+	keys.sort()
+	var parts: Array[String] = []
+	for key in keys:
+		parts.append("%s=%s" % [key.replace("_", " "), str(evidence_value[key])])
+	return "; ".join(parts)
 
 func _format_number(value: int) -> String:
 	var digits := str(value)

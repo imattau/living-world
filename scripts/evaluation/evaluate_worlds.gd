@@ -41,6 +41,8 @@ func _summarize_world(world: WorldState, starting_population: int) -> Dictionary
 	var culture_splits := 0
 	var events_with_facts := 0
 	var events_with_cause_links := 0
+	var event_reference_links := 0
+	var condition_evidence_links := 0
 	var maximum_dispute_score := 0.0
 	var maximum_resource_pressure := 0.0
 	var contested_pairs := 0
@@ -63,6 +65,11 @@ func _summarize_world(world: WorldState, starting_population: int) -> Dictionary
 			events_with_facts += 1
 		if not event.cause_links.is_empty():
 			events_with_cause_links += 1
+		for cause in event.cause_links:
+			if cause.has("event_id"):
+				event_reference_links += 1
+			elif cause.has("condition") and cause.has("evidence"):
+				condition_evidence_links += 1
 		match event.type:
 			"famine_began":
 				famine_events += 1
@@ -121,6 +128,8 @@ func _summarize_world(world: WorldState, starting_population: int) -> Dictionary
 		"events_total": world.events.size(),
 		"events_with_facts_percent": 100.0 * float(events_with_facts) / maxf(1.0, float(world.events.size())),
 		"events_with_cause_links": events_with_cause_links,
+		"event_reference_links": event_reference_links,
+		"condition_evidence_links": condition_evidence_links,
 		"maximum_dispute_score": maximum_dispute_score,
 		"maximum_resource_pressure": maximum_resource_pressure,
 		"contested_border_pairs": contested_pairs,
@@ -139,6 +148,8 @@ func _summarize_collection(rows: Array[Dictionary]) -> Dictionary:
 	var total_events := 0
 	var total_facts_events := 0.0
 	var total_cause_links := 0
+	var total_event_reference_links := 0
+	var total_condition_evidence_links := 0
 	var seeds_with_famine := 0
 	var seeds_with_migration := 0
 	var seeds_with_trade := 0
@@ -168,6 +179,8 @@ func _summarize_collection(rows: Array[Dictionary]) -> Dictionary:
 		total_events += int(row["events_total"])
 		total_facts_events += float(row["events_with_facts_percent"]) * float(row["events_total"]) / 100.0
 		total_cause_links += int(row["events_with_cause_links"])
+		total_event_reference_links += int(row["event_reference_links"])
+		total_condition_evidence_links += int(row["condition_evidence_links"])
 		seeds_with_famine += 1 if int(row["famine_events"]) > 0 else 0
 		seeds_with_migration += 1 if int(row["migration_events"]) > 0 else 0
 		seeds_with_trade += 1 if int(row["trade_events"]) > 0 else 0
@@ -211,6 +224,8 @@ func _summarize_collection(rows: Array[Dictionary]) -> Dictionary:
 		"trade_events_median": trade_values[trade_values.size() / 2],
 		"events_with_facts_percent": 100.0 * total_facts_events / maxf(1.0, float(total_events)),
 		"events_with_cause_links": total_cause_links,
+		"event_reference_links": total_event_reference_links,
+		"condition_evidence_links": total_condition_evidence_links,
 		"events_total": total_events,
 		"seeds_with_famine": seeds_with_famine,
 		"seeds_with_migration": seeds_with_migration,

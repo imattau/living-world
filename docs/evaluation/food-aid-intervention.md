@@ -34,4 +34,4 @@ Simulation version advanced from 3 to 4 for the intervention-capable rule set so
 
 ## Design decision
 
-Keep food aid as a working prototype action, but do not infer that it is balanced or sufficiently consequential from this sample. Before adding more interventions, improve the evaluation signals to capture short-term food coverage, famine duration, and the target's population trajectory around the action. Then repeat the paired evaluation over more seeds and intervention timings. The next history-quality milestone remains causal links between events and their recorded conditions.
+Keep food aid as a working prototype action, but do not infer that it is balanced or sufficiently consequential from this sample. Before adding more interventions, improve the evaluation signals to capture short-term food coverage, famine duration, and the target's population trajectory around the action. Then repeat the paired evaluation over more seeds and intervention timings. Causal links were added in the following milestone; see the updated [year-250 baseline](year-250-baseline.md) for current coverage.

@@ -142,12 +142,38 @@ static func from_save_dictionary(data: Dictionary) -> Dictionary:
 		world.next_command_sequence = maxi(world.next_command_sequence, expected_sequence)
 		if world.command_cursor < 0 or world.command_cursor > world.command_log.size():
 			return {"error": "Save command cursor is invalid."}
+	var seen_event_years := {}
+	var previous_event_id := 0
 	for event_data in data["event_log"]:
 		if typeof(event_data) != TYPE_DICTIONARY or not event_data.has("id") or not event_data.has("year") or not event_data.has("type"):
 			return {"error": "Save event log contains an invalid entry."}
 		if typeof(event_data.get("facts", {})) != TYPE_DICTIONARY or typeof(event_data.get("cause_links", [])) != TYPE_ARRAY:
 			return {"error": "Save event data is malformed."}
-		world.events.append(_event_from_dictionary(event_data))
+		var event_id := int(event_data["id"])
+		var event_year := int(event_data["year"])
+		if typeof(event_data["id"]) != TYPE_INT or typeof(event_data["year"]) != TYPE_INT or event_id <= previous_event_id or event_year < 0:
+			return {"error": "Save event IDs or years are invalid."}
+		for cause_value in event_data.get("cause_links", []):
+			if typeof(cause_value) != TYPE_DICTIONARY:
+				return {"error": "Save event cause link is malformed."}
+			var cause: Dictionary = cause_value
+			if not cause.has("category") or typeof(cause["category"]) != TYPE_STRING or str(cause["category"]).is_empty() or not cause.has("strength") or typeof(cause["strength"]) not in [TYPE_INT, TYPE_FLOAT]:
+				return {"error": "Save event cause link is missing its category or strength."}
+			var strength := float(cause["strength"])
+			if strength < 0.0 or strength > 1.0:
+				return {"error": "Save event cause strength must be between 0 and 1."}
+			if cause.has("event_id"):
+				if typeof(cause["event_id"]) != TYPE_INT:
+					return {"error": "Save event cause reference is invalid."}
+				var source_id := int(cause["event_id"])
+				if not seen_event_years.has(source_id) or int(seen_event_years[source_id]) > event_year:
+					return {"error": "Save event cause link must point to an earlier event."}
+			elif not cause.has("condition") or typeof(cause["condition"]) != TYPE_STRING or str(cause["condition"]).is_empty() or typeof(cause.get("evidence", {})) != TYPE_DICTIONARY:
+				return {"error": "Save event cause link must reference an event or recorded condition."}
+		var event := _event_from_dictionary(event_data)
+		world.events.append(event)
+		seen_event_years[event_id] = event_year
+		previous_event_id = event_id
 	if data.has("snapshots"):
 		if typeof(data["snapshots"]) != TYPE_ARRAY:
 			return {"error": "Save checkpoints are invalid."}

@@ -82,7 +82,9 @@ All entities use stable integer IDs scoped to one world. IDs are assigned by det
 - `map_width`, `map_height: int`
 - `map: MapData`
 - dictionaries keyed by ID: `regions`, `settlements`, `cultures`, `states`
-- `events: Array[HistoryEvent]`
+- `events: Array[HistoryEvent]`, `snapshots: Array[Dictionary]`
+- append-only command log with cursor and next sequence number
+- available player Influence
 - `next_entity_id`, `next_event_id: int`
 
 ### `MapData`
@@ -153,7 +155,7 @@ Same seed, generator version, simulation version, and command sequence must prod
 5. **Economy and exchange:** resolve only coarse local surpluses, shortages, and neighboring trade. Avoid per-item markets.
 6. **Politics:** update state stability from food pressure, store bilateral border disputes, and declare wars when the documented dispute and stability thresholds are met.
 7. **Conflict:** resolve one coarse engagement per active neighboring state pair per year from strength plus seeded variance; apply casualties and stability changes, and agree peace when the losing state falls below the stability threshold. This is not tactical combat.
-8. **Event commit:** assign IDs, attach cause links, append events, update indexes/checkpoints, and close the year.
+8. **Event finalization:** append events with IDs and causes recorded by the phase rules, update checkpoints, and close the year.
 
 If a phase emits a change that another phase needs immediately, define that explicitly in the phase contract. Otherwise apply it at the phase boundary. The order is part of the simulation version.
 
@@ -172,9 +174,9 @@ Each event contains:
 - `cause_links: Array[CauseLink]`
 - optional `template_key` for localized display text
 
-A cause link contains a source event ID when a prior event exists, a cause category, and a contribution value or strength. It may also contain a short structured fact when the cause is a condition rather than a discrete prior event (for example consecutive poor harvests). Links point backward in time; reject self-links and cycles. Contribution strengths are explanatory signals, not scientific probabilities, and do not need to sum to 100 unless a presentation explicitly normalizes them.
+A cause link contains a source event ID when a prior event exists, a cause category, and a contribution value or strength. A condition link contains a condition key and structured evidence when the cause is a measured rule input rather than a discrete prior event (for example food coverage below a threshold). Event references must point to an earlier event-log entry whose year is no later than the caused event; this ordering prevents self-links and cycles. Contribution strengths are explanatory signals, not scientific probabilities, and do not need to sum to 100 unless a presentation explicitly normalizes them.
 
-For the initial version, capture the main direct causes and relevant conditions. Avoid adding narrative cause links that the rule did not actually use. If the system cannot support a strong causal claim, record the observed condition and label it as contributing evidence.
+The current implementation records rule conditions for food stress, migration, food exchange, disputes, military comparisons, abandonment, and status changes. It links recent events where the simulation has an explicit chain, including food stress to migration, war to battle, battle to peace, and intervention to recovery. Avoid adding narrative cause links that the rule did not actually use. If the system cannot support a strong causal claim, record the observed condition and label it as contributing evidence. Save loading validates link shape, strength bounds, and backward event references.
 
 ### Example
 
@@ -188,8 +190,8 @@ For the initial version, capture the main direct causes and relevant conditions.
   "participant_ids": [12, 17],
   "facts": {"dispute_score": 0.74},
   "cause_links": [
-    {"event_id": 77, "category": "territorial_dispute", "strength": 0.8},
-    {"event_id": 79, "category": "resource_competition", "strength": 0.5}
+    {"category": "territorial_dispute", "condition": "dispute_threshold_reached", "evidence": {"dispute_score": 0.74, "threshold": 0.7}, "strength": 1.0},
+    {"category": "resource_competition", "condition": "food_pressure_raised_dispute", "evidence": {"resource_pressure": 0.6}, "strength": 0.8}
   ]
 }
 ```
@@ -264,7 +266,7 @@ These are acceptance scenarios for implementation; they do not prescribe a testi
 8. **Intervention and evaluation:** schedule limited actions, persist and replay commands, and compare paired outcomes.
 9. **Causal history:** connect events to prior events and recorded conditions so the chronicle can explain how outcomes emerged.
 
-The prototype includes one constrained intervention: spend 1 Influence to send food aid to a selected active settlement. It is applied at the start of the following year, adds up to half a year of food need subject to store capacity, and is recorded as an event. Influence starts at 3, regenerates by 0.1 per year, and is capped at 5. A paired 20-seed evaluation found a small but consistently positive target-population difference; famine and survival outcomes were unchanged. Treat this as an initial signal, not a balance result, because the sample and current event measures cannot establish lasting famine relief. Further interventions remain deferred while event-causality records and stronger intervention evaluation signals are developed. Simulation version 4 identifies the intervention-capable rules.
+The prototype includes one constrained intervention: spend 1 Influence to send food aid to a selected active settlement. It is applied at the start of the following year, adds up to half a year of food need subject to store capacity, and is recorded as an event. Influence starts at 3, regenerates by 0.1 per year, and is capped at 5. A paired 20-seed evaluation found a small but consistently positive target-population difference; famine and survival outcomes were unchanged. Treat this as an initial signal, not a balance result, because the sample and current event measures cannot establish lasting famine relief. Further interventions remain deferred pending stronger outcome measures and wider evaluation. Simulation version 4 identifies the intervention-capable rules.
 
 ## 15. Settled prototype defaults
 
